@@ -93,8 +93,9 @@ them for production releases.
 
 - Publishes to an existing agent without requiring a prior clone or `guild.json`.
   It does not create missing agents or automatically bump versions.
-- Uses one-way publication. Visibility, workspace pins, and installed workspace
-  versions are unchanged. Workspaces select the new version independently.
+- Uses one-way publication and preserves visibility. The Action issues no
+  workspace upgrades; existing Guild auto-update settings still apply and may
+  move workspace installations to the newly published version.
 - Adds no publication retries. After failure or timeout, inspect Guild and the
   logs before retrying; publication may have progressed before a connection failed.
 - Uses the CLI's file filtering, including the source directory's `.gitignore`
@@ -126,8 +127,9 @@ The `Authenticated smoke` workflow is a post-merge test on `main`. It requires a
 dedicated existing test agent in `GUILD_TEST_AGENT`, a test account key in the
 `GUILD_TEST_API_KEY` secret, two different new source versions, and explicit
 overwrite consent. It publishes a generic Goose fixture, checks rejection of
-invalid source, and verifies the working publication remains published. Missing
-configuration fails visibly. Authenticated validation remains pending until a
+invalid source, and verifies the working version remains the agent's latest
+published selection. Missing configuration fails visibly. Authenticated
+validation remains pending until a
 successful configured run; credential-free tests do not establish it.
 
 License: [Apache-2.0](LICENSE).

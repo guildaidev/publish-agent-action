@@ -33,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: main
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -123,6 +123,13 @@ jobs:
             const env = { PATH: process.env.PATH, HOME: state, GUILD_API_KEY: process.env.GUILD_API_KEY,
               GUILDCORE_URL: 'https://app.guild.ai/api', GUILD_STATE_DIR: state, GUILD_CONFIG_DIR: state,
               CI: 'true', NO_COLOR: '1' };
+            const agentResult = spawnSync(process.execPath, [process.env.GUILD_PUBLISH_CLI, '--mode', 'json',
+              'agent', 'get', process.env.TEST_AGENT],
+              { env, encoding: 'utf8', timeout: 60000, maxBuffer: 10 * 1024 * 1024 });
+            assert.equal(agentResult.status, 0, 'Read-only agent verification failed.');
+            const agent = JSON.parse(agentResult.stdout);
+            assert.equal(agent.latest_published_version?.id, process.env.VALID_VERSION_ID,
+              'The working version must remain the agent latest published selection.');
             const result = spawnSync(process.execPath, [process.env.GUILD_PUBLISH_CLI, '--mode', 'json',
               'agent', 'versions', process.env.TEST_AGENT, '--limit', '100'],
               { env, encoding: 'utf8', timeout: 60000, maxBuffer: 10 * 1024 * 1024 });
