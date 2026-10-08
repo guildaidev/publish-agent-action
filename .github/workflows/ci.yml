@@ -1,0 +1,54 @@
+# Copyright 2026 Guild.ai
+# SPDX-License-Identifier: Apache-2.0
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Test real wrappers against controlled external boundaries
+        run: node --test test/*.test.mjs
+      - name: Parse Action metadata and lint workflows
+        run: |
+          ruby -e 'require "yaml"; ARGV.each { |file| YAML.safe_load(File.read(file), aliases: true) }' action.yml .github/workflows/ci.yml .github/workflows/smoke.yml
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+      - name: Check whitespace
+        run: git diff --check
+      - name: Exercise the full composite without credentials
+        id: missing-key
+        continue-on-error: true
+        uses: ./
+        with:
+          path: test/fixtures
+          agent: myorg~example
+        env:
+          GUILD_API_KEY: ''
+      - name: Verify CLI installation and missing-key rejection separately
+        if: always()
+        env:
+          ACTION_OUTCOME: ${{ steps.missing-key.outcome }}
+          FAILURE_REASON: ${{ steps.missing-key.outputs.failure-reason }}
+          CLI_VERSION: ${{ steps.missing-key.outputs.cli-version }}
+          AGENT_ID: ${{ steps.missing-key.outputs.agent-id }}
+          VERSION_ID: ${{ steps.missing-key.outputs.version-id }}
+          SOURCE_VERSION: ${{ steps.missing-key.outputs.version }}
+        run: |
+          test "$CLI_VERSION" = '0.26.0'
+          test "$ACTION_OUTCOME" = 'failure'
+          test "$FAILURE_REASON" = 'missing-api-key'
+          test -z "$AGENT_ID$VERSION_ID$SOURCE_VERSION"

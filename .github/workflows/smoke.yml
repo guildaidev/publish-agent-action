@@ -1,0 +1,141 @@
+# Copyright 2026 Guild.ai
+# SPDX-License-Identifier: Apache-2.0
+name: Authenticated smoke
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: New stable version to publish to the dedicated test agent.
+        required: true
+        type: string
+      invalid-version:
+        description: Different new stable version used for the rejected-source check.
+        required: true
+        type: string
+      overwrite:
+        description: Consent to replace test-agent source with the generic fixture.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guild-publish-${{ vars.GUILD_TEST_AGENT || 'unconfigured-smoke' }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: github.ref == 'refs/heads/main' && github.repository == 'guildaidev/publish-agent-action'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Require dedicated smoke configuration and overwrite consent
+        env:
+          GUILD_API_KEY: ${{ secrets.GUILD_TEST_API_KEY }}
+          TEST_AGENT: ${{ vars.GUILD_TEST_AGENT }}
+          OVERWRITE: ${{ inputs.overwrite }}
+          VALID_VERSION: ${{ inputs.version }}
+          INVALID_VERSION: ${{ inputs.invalid-version }}
+        run: |
+          if test -z "$GUILD_API_KEY" || test -z "$TEST_AGENT"; then
+            echo '::error::Configure GUILD_TEST_API_KEY and GUILD_TEST_AGENT for a dedicated existing test agent. Authenticated smoke has not run.'
+            exit 1
+          fi
+          test "$OVERWRITE" = 'true' || { echo '::error::Explicit overwrite consent is required for the test agent.'; exit 1; }
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { copyFile, mkdir, writeFile } from 'node:fs/promises';
+          const { VALID_VERSION, INVALID_VERSION } = process.env;
+          const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+          assert.ok(stable.test(VALID_VERSION) && stable.test(INVALID_VERSION), 'Supply stable source versions.');
+          assert.notEqual(VALID_VERSION, INVALID_VERSION, 'Use different new source versions.');
+          for (const [name, version] of [['valid', VALID_VERSION], ['invalid', INVALID_VERSION]]) {
+            await mkdir(`.smoke/${name}`, { recursive: true });
+            await writeFile(`.smoke/${name}/VERSION`, `${version}\n`);
+          }
+          await copyFile('test/fixtures/recipe.yaml', '.smoke/valid/recipe.yaml');
+          await writeFile('.smoke/invalid/recipe.yaml', 'title: [unterminated\n');
+          JS
+      - name: Publish the generic valid fixture through the composite
+        id: valid
+        uses: ./
+        with:
+          path: .smoke/valid
+          agent: ${{ vars.GUILD_TEST_AGENT }}
+          version: ${{ inputs.version }}
+          overwrite: 'true'
+        env:
+          GUILD_API_KEY: ${{ secrets.GUILD_TEST_API_KEY }}
+      - name: Reject invalid source through the same composite
+        id: invalid
+        continue-on-error: true
+        uses: ./
+        with:
+          path: .smoke/invalid
+          agent: ${{ vars.GUILD_TEST_AGENT }}
+          version: ${{ inputs.invalid-version }}
+          overwrite: 'true'
+        env:
+          GUILD_API_KEY: ${{ secrets.GUILD_TEST_API_KEY }}
+      - name: Verify rejection after successful CLI installation
+        env:
+          INVALID_OUTCOME: ${{ steps.invalid.outcome }}
+          INVALID_REASON: ${{ steps.invalid.outputs.failure-reason }}
+          INVALID_VERSION_ID: ${{ steps.invalid.outputs.version-id }}
+          CLI_VERSION: ${{ steps.invalid.outputs.cli-version }}
+        run: |
+          test "$INVALID_OUTCOME" = 'failure'
+          test "$CLI_VERSION" = '0.26.0'
+          test -z "$INVALID_REASON$INVALID_VERSION_ID"
+      - name: Install isolated CLI for read-only publication verification
+        id: verify-cli
+        env:
+          GUILD_API_KEY: ''
+          NODE_AUTH_TOKEN: ''
+          GUILD_PUBLISH_CLI_VERSION: '0.26.0'
+        run: node scripts/install-cli.mjs
+      - name: Confirm the working publication survived the rejected source
+        env:
+          GUILD_API_KEY: ${{ secrets.GUILD_TEST_API_KEY }}
+          TEST_AGENT: ${{ vars.GUILD_TEST_AGENT }}
+          VALID_VERSION_ID: ${{ steps.valid.outputs.version-id }}
+          VALID_VERSION: ${{ inputs.version }}
+          INVALID_VERSION: ${{ inputs.invalid-version }}
+          GUILD_PUBLISH_CLI: ${{ steps.verify-cli.outputs.entrypoint }}
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import { mkdtemp, rm } from 'node:fs/promises';
+          import path from 'node:path';
+          import { spawnSync } from 'node:child_process';
+          const state = await mkdtemp(path.join(process.env.RUNNER_TEMP, 'guild-smoke-state-'));
+          try {
+            const env = { PATH: process.env.PATH, HOME: state, GUILD_API_KEY: process.env.GUILD_API_KEY,
+              GUILDCORE_URL: 'https://app.guild.ai/api', GUILD_STATE_DIR: state, GUILD_CONFIG_DIR: state,
+              CI: 'true', NO_COLOR: '1' };
+            const result = spawnSync(process.execPath, [process.env.GUILD_PUBLISH_CLI, '--mode', 'json',
+              'agent', 'versions', process.env.TEST_AGENT, '--limit', '100'],
+              { env, encoding: 'utf8', timeout: 60000, maxBuffer: 10 * 1024 * 1024 });
+            assert.equal(result.status, 0, 'Read-only version verification failed.');
+            const { items } = JSON.parse(result.stdout);
+            assert.ok(Array.isArray(items), 'Expected version list.');
+            const working = items.find(version => version.id === process.env.VALID_VERSION_ID);
+            assert.ok(working, 'Working version was not found.');
+            assert.equal(working.version_number, process.env.VALID_VERSION);
+            assert.equal(working.status, 'PUBLISHED');
+            assert.equal(working.validation_status, 'PASSED');
+            assert.ok(!items.some(version => version.version_number === process.env.INVALID_VERSION && version.status === 'PUBLISHED'),
+              'Invalid source must not be published.');
+            console.log('Valid publication confirmed; invalid source was rejected and did not replace it.');
+          } finally { await rm(state, { recursive: true, force: true }); }
+          JS

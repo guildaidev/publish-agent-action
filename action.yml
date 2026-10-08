@@ -1,0 +1,80 @@
+# Copyright 2026 Guild.ai
+# SPDX-License-Identifier: Apache-2.0
+name: Publish Agent to Guild
+author: Guild.ai
+description: Publish an existing Guild agent from source with explicit versioning and overwrite consent.
+branding:
+  icon: upload-cloud
+  color: purple
+
+inputs:
+  path:
+    description: Agent source directory inside the checked-out repository.
+    required: true
+  agent:
+    description: Existing target agent in owner~name form.
+    required: true
+  version:
+    description: Stable MAJOR.MINOR.PATCH; optional when VERSION or package.json supplies it. All supplied versions must agree.
+    required: false
+    default: ''
+  overwrite:
+    description: Explicitly prefer repository source over Guild edits using --force. Does not replace a published version number.
+    required: false
+    default: 'false'
+  cli-version:
+    description: Exact stable Guild CLI version >= 0.26.0, or latest. Future versions are not guaranteed compatible.
+    required: false
+    default: '0.26.0'
+
+outputs:
+  agent-id:
+    description: Guild ID of the target agent, available after confirmed publication.
+    value: ${{ steps.publish.outputs.agent-id }}
+  version-id:
+    description: Exact published Guild version ID.
+    value: ${{ steps.publish.outputs.version-id }}
+  version:
+    description: Published source version.
+    value: ${{ steps.publish.outputs.version }}
+  failure-reason:
+    description: missing-api-key when publication was refused because no key was supplied; empty otherwise.
+    value: ${{ steps.publish.outputs.failure-reason }}
+  cli-version:
+    description: Verified installed CLI version, available even when publication fails.
+    value: ${{ steps.cli.outputs.cli-version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      env:
+        GUILD_API_KEY: ''
+        NODE_AUTH_TOKEN: ''
+      with:
+        node-version: '22'
+        package-manager-cache: false
+
+    - name: Install and verify the Guild CLI
+      id: cli
+      shell: bash
+      env:
+        GUILD_API_KEY: ''
+        NODE_AUTH_TOKEN: ''
+        GUILD_PUBLISH_ACTION_PATH: ${{ github.action_path }}
+        GUILD_PUBLISH_CLI_VERSION: ${{ inputs.cli-version }}
+      run: node "$GUILD_PUBLISH_ACTION_PATH/scripts/install-cli.mjs"
+
+    - name: Upload, validate, and publish
+      id: publish
+      shell: bash
+      env:
+        GUILD_PUBLISH_ACTION_PATH: ${{ github.action_path }}
+        GUILD_PUBLISH_CLI: ${{ steps.cli.outputs.entrypoint }}
+        GUILD_PUBLISH_CLI_VERSION: ${{ steps.cli.outputs.cli-version }}
+        GUILD_PUBLISH_PATH: ${{ inputs.path }}
+        GUILD_PUBLISH_AGENT: ${{ inputs.agent }}
+        GUILD_PUBLISH_VERSION: ${{ inputs.version }}
+        GUILD_PUBLISH_OVERWRITE: ${{ inputs.overwrite }}
+      run: node "$GUILD_PUBLISH_ACTION_PATH/scripts/publish.mjs"
