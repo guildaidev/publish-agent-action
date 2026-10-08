@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Publish Agent to Guild
 author: Guild.ai
-description: Publish an existing Guild agent from source with explicit versioning and overwrite consent.
+description: Publish a Guild agent from source with explicit versioning, optional private creation, and overwrite consent.
 branding:
   icon: upload-cloud
   color: purple
@@ -12,7 +12,7 @@ inputs:
     description: Agent source directory inside the checked-out repository.
     required: true
   agent:
-    description: Existing target agent in owner~name form.
+    description: Target agent in owner~name form. Must exist unless create-if-missing is true.
     required: true
   version:
     description: Stable MAJOR.MINOR.PATCH; optional when VERSION or package.json supplies it. All supplied versions must agree.
@@ -22,10 +22,18 @@ inputs:
     description: Explicitly prefer repository source over Guild edits using --force. Does not replace a published version number.
     required: false
     default: 'false'
-  cli-version:
-    description: Exact stable Guild CLI version >= 0.26.0, or latest. Future versions are not guaranteed compatible.
+  create-if-missing:
+    description: Explicitly allow the CLI to create a missing target as a private agent. Does not imply overwrite consent.
     required: false
-    default: '0.26.0'
+    default: 'false'
+  agent-type:
+    description: Required with create-if-missing. GUILD_TYPESCRIPT, GUILD_NATIVE, GOOSE, OPENCLAW, or LANGGRAPH; must match any existing target.
+    required: false
+    default: ''
+  cli-version:
+    description: Exact stable Guild CLI version >= 0.27.1, or latest. Future versions are not guaranteed compatible.
+    required: false
+    default: '0.27.1'
 
 outputs:
   agent-id:
@@ -77,4 +85,6 @@ runs:
         GUILD_PUBLISH_AGENT: ${{ inputs.agent }}
         GUILD_PUBLISH_VERSION: ${{ inputs.version }}
         GUILD_PUBLISH_OVERWRITE: ${{ inputs.overwrite }}
+        GUILD_PUBLISH_CREATE_IF_MISSING: ${{ inputs.create-if-missing }}
+        GUILD_PUBLISH_AGENT_TYPE: ${{ inputs.agent-type }}
       run: node "$GUILD_PUBLISH_ACTION_PATH/scripts/publish.mjs"

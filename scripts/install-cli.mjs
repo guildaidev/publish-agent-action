@@ -9,8 +9,8 @@ const stableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 
 function supported(version) {
   if (typeof version !== 'string' || !stableVersion.test(version)) return false;
-  const [major, minor] = version.split('.').map(BigInt);
-  return major > 0n || minor >= 26n;
+  const [major, minor, patch] = version.split('.').map(BigInt);
+  return major > 0n || minor > 27n || (minor === 27n && patch >= 1n);
 }
 
 function run(command, args, installEnv, cwd) {
@@ -22,9 +22,9 @@ function run(command, args, installEnv, cwd) {
 }
 
 async function main() {
-  const requested = env.GUILD_PUBLISH_CLI_VERSION || '0.26.0';
+  const requested = env.GUILD_PUBLISH_CLI_VERSION || '0.27.1';
   if (requested !== 'latest' && !supported(requested)) {
-    throw new Error('CLI version must be an exact stable MAJOR.MINOR.PATCH >= 0.26.0, or latest.');
+    throw new Error('CLI version must be an exact stable MAJOR.MINOR.PATCH >= 0.27.1, or latest.');
   }
   if (!env.RUNNER_TEMP || !env.GITHUB_OUTPUT) throw new Error('Run the CLI installer through GitHub Actions.');
   const dir = await realpath(await mkdtemp(path.join(env.RUNNER_TEMP, 'guild-publish-cli-')));

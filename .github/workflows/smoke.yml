@@ -4,16 +4,8 @@ name: Authenticated smoke
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: New stable version to publish to the dedicated test agent.
-        required: true
-        type: string
-      invalid-version:
-        description: Different new stable version used for the rejected-source check.
-        required: true
-        type: string
       overwrite:
-        description: Consent to replace test-agent source with the generic fixture.
+        description: Consent to create the dedicated private test agent and update its source with generic fixtures.
         required: true
         default: false
         type: boolean
@@ -29,7 +21,7 @@ jobs:
   smoke:
     if: github.ref == 'refs/heads/main' && github.repository == 'guildaidev/publish-agent-action'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -44,35 +36,54 @@ jobs:
           GUILD_API_KEY: ${{ secrets.GUILD_TEST_API_KEY }}
           TEST_AGENT: ${{ vars.GUILD_TEST_AGENT }}
           OVERWRITE: ${{ inputs.overwrite }}
-          VALID_VERSION: ${{ inputs.version }}
-          INVALID_VERSION: ${{ inputs.invalid-version }}
         run: |
           if test -z "$GUILD_API_KEY" || test -z "$TEST_AGENT"; then
-            echo '::error::Configure GUILD_TEST_API_KEY and GUILD_TEST_AGENT for a dedicated existing test agent. Authenticated smoke has not run.'
+            echo '::error::Configure GUILD_TEST_API_KEY and GUILD_TEST_AGENT for a dedicated unused test agent name. Authenticated smoke has not run.'
             exit 1
           fi
           test "$OVERWRITE" = 'true' || { echo '::error::Explicit overwrite consent is required for the test agent.'; exit 1; }
           node --input-type=module <<'JS'
           import assert from 'node:assert/strict';
-          import { copyFile, mkdir, writeFile } from 'node:fs/promises';
-          const { VALID_VERSION, INVALID_VERSION } = process.env;
-          const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-          assert.ok(stable.test(VALID_VERSION) && stable.test(INVALID_VERSION), 'Supply stable source versions.');
-          assert.notEqual(VALID_VERSION, INVALID_VERSION, 'Use different new source versions.');
-          for (const [name, version] of [['valid', VALID_VERSION], ['invalid', INVALID_VERSION]]) {
+          import { appendFile, copyFile, mkdir, writeFile } from 'node:fs/promises';
+          assert.match(process.env.TEST_AGENT, /^[a-z0-9_.-]{1,100}~[a-z0-9_.-]{1,100}$/, 'Supply an explicit dedicated owner~name.');
+          for (const [name, version] of [['initial', '1.0.0'], ['valid', '1.0.1'], ['duplicate', '1.0.1'], ['invalid', '1.0.2']]) {
             await mkdir(`.smoke/${name}`, { recursive: true });
             await writeFile(`.smoke/${name}/VERSION`, `${version}\n`);
           }
+          await copyFile('test/fixtures/recipe.yaml', '.smoke/initial/recipe.yaml');
           await copyFile('test/fixtures/recipe.yaml', '.smoke/valid/recipe.yaml');
+          // Fresh directory and changed source avoid the CLI's local no-change
+          // shortcut, so the duplicate attempt reaches the version boundary.
+          await copyFile('test/fixtures/recipe.yaml', '.smoke/duplicate/recipe.yaml');
+          await appendFile('.smoke/duplicate/recipe.yaml', '\n# Deliberately changed source under an already published version.\n');
           await writeFile('.smoke/invalid/recipe.yaml', 'title: [unterminated\n');
           JS
-      - name: Publish the generic valid fixture through the composite
+      - name: Create a private agent and publish 1.0.0 through the composite
+        id: initial
+        uses: ./
+        with:
+          path: .smoke/initial
+          agent: ${{ vars.GUILD_TEST_AGENT }}
+          create-if-missing: 'true'
+          agent-type: GOOSE
+        env:
+          GUILD_API_KEY: ${{ secrets.GUILD_TEST_API_KEY }}
+      - name: Update the same agent to 1.0.1 through the composite
         id: valid
         uses: ./
         with:
           path: .smoke/valid
           agent: ${{ vars.GUILD_TEST_AGENT }}
-          version: ${{ inputs.version }}
+          overwrite: 'true'
+        env:
+          GUILD_API_KEY: ${{ secrets.GUILD_TEST_API_KEY }}
+      - name: Reject duplicate 1.0.1 through the same composite
+        id: duplicate
+        continue-on-error: true
+        uses: ./
+        with:
+          path: .smoke/duplicate
+          agent: ${{ vars.GUILD_TEST_AGENT }}
           overwrite: 'true'
         env:
           GUILD_API_KEY: ${{ secrets.GUILD_TEST_API_KEY }}
@@ -83,7 +94,6 @@ jobs:
         with:
           path: .smoke/invalid
           agent: ${{ vars.GUILD_TEST_AGENT }}
-          version: ${{ inputs.invalid-version }}
           overwrite: 'true'
         env:
           GUILD_API_KEY: ${{ secrets.GUILD_TEST_API_KEY }}
@@ -93,24 +103,34 @@ jobs:
           INVALID_REASON: ${{ steps.invalid.outputs.failure-reason }}
           INVALID_VERSION_ID: ${{ steps.invalid.outputs.version-id }}
           CLI_VERSION: ${{ steps.invalid.outputs.cli-version }}
+          DUPLICATE_OUTCOME: ${{ steps.duplicate.outcome }}
+          DUPLICATE_REASON: ${{ steps.duplicate.outputs.failure-reason }}
+          DUPLICATE_VERSION_ID: ${{ steps.duplicate.outputs.version-id }}
+          DUPLICATE_CLI_VERSION: ${{ steps.duplicate.outputs.cli-version }}
         run: |
           test "$INVALID_OUTCOME" = 'failure'
-          test "$CLI_VERSION" = '0.26.0'
+          test "$CLI_VERSION" = '0.27.1'
           test -z "$INVALID_REASON$INVALID_VERSION_ID"
+          test "$DUPLICATE_OUTCOME" = 'failure'
+          test "$DUPLICATE_CLI_VERSION" = '0.27.1'
+          test -z "$DUPLICATE_REASON$DUPLICATE_VERSION_ID"
       - name: Install isolated CLI for read-only publication verification
         id: verify-cli
         env:
           GUILD_API_KEY: ''
           NODE_AUTH_TOKEN: ''
-          GUILD_PUBLISH_CLI_VERSION: '0.26.0'
+          GUILD_PUBLISH_CLI_VERSION: '0.27.1'
         run: node scripts/install-cli.mjs
       - name: Confirm the working publication survived the rejected source
         env:
           GUILD_API_KEY: ${{ secrets.GUILD_TEST_API_KEY }}
           TEST_AGENT: ${{ vars.GUILD_TEST_AGENT }}
           VALID_VERSION_ID: ${{ steps.valid.outputs.version-id }}
-          VALID_VERSION: ${{ inputs.version }}
-          INVALID_VERSION: ${{ inputs.invalid-version }}
+          INITIAL_VERSION_ID: ${{ steps.initial.outputs.version-id }}
+          INITIAL_AGENT_ID: ${{ steps.initial.outputs.agent-id }}
+          VALID_AGENT_ID: ${{ steps.valid.outputs.agent-id }}
+          VALID_VERSION: '1.0.1'
+          INVALID_VERSION: '1.0.2'
           GUILD_PUBLISH_CLI: ${{ steps.verify-cli.outputs.entrypoint }}
         run: |
           node --input-type=module <<'JS'
@@ -128,6 +148,10 @@ jobs:
               { env, encoding: 'utf8', timeout: 60000, maxBuffer: 10 * 1024 * 1024 });
             assert.equal(agentResult.status, 0, 'Read-only agent verification failed.');
             const agent = JSON.parse(agentResult.stdout);
+            assert.equal(agent.full_name, process.env.TEST_AGENT);
+            assert.equal(agent.is_public, false, 'The created test agent must remain private.');
+            assert.equal(agent.id, process.env.INITIAL_AGENT_ID, 'The created agent ID must match.');
+            assert.equal(agent.id, process.env.VALID_AGENT_ID, 'The update must target the same agent.');
             assert.equal(agent.latest_published_version?.id, process.env.VALID_VERSION_ID,
               'The working version must remain the agent latest published selection.');
             const result = spawnSync(process.execPath, [process.env.GUILD_PUBLISH_CLI, '--mode', 'json',
@@ -136,13 +160,22 @@ jobs:
             assert.equal(result.status, 0, 'Read-only version verification failed.');
             const { items } = JSON.parse(result.stdout);
             assert.ok(Array.isArray(items), 'Expected version list.');
+            const initial = items.find(version => version.id === process.env.INITIAL_VERSION_ID);
+            assert.ok(initial, 'Initial publication was not found.');
+            assert.equal(initial.version_number, '1.0.0');
+            assert.equal(initial.status, 'PUBLISHED');
+            assert.equal(initial.validation_status, 'PASSED');
             const working = items.find(version => version.id === process.env.VALID_VERSION_ID);
             assert.ok(working, 'Working version was not found.');
             assert.equal(working.version_number, process.env.VALID_VERSION);
             assert.equal(working.status, 'PUBLISHED');
             assert.equal(working.validation_status, 'PASSED');
+            assert.equal(items.filter(version => version.version_number === process.env.VALID_VERSION && version.status === 'PUBLISHED').length, 1,
+              'Duplicate publication must not create another published version.');
+            assert.ok(items.some(version => version.version_number === process.env.INVALID_VERSION && version.validation_status === 'FAILED'),
+              'The invalid-source attempt must reach Guild validation and fail, not merely lose authentication.');
             assert.ok(!items.some(version => version.version_number === process.env.INVALID_VERSION && version.status === 'PUBLISHED'),
               'Invalid source must not be published.');
-            console.log('Valid publication confirmed; invalid source was rejected and did not replace it.');
+            console.log('Valid publication confirmed: private 1.0.0 creation, same-agent 1.0.1 update, duplicate and invalid-source rejection.');
           } finally { await rm(state, { recursive: true, force: true }); }
           JS

@@ -25,7 +25,7 @@ async function fixture(t, options = {}) {
     const args = process.argv.slice(2);
     appendFileSync(${JSON.stringify(callsFile)}, JSON.stringify({ args, env: process.env, cwd: process.cwd() }) + '\\n');
     if (args[0] === 'view') {
-      console.log(JSON.stringify(options.resolved ?? (args[1].endsWith('@latest') ? '0.27.0' : args[1].split('@').at(-1))));
+      console.log(JSON.stringify(options.resolved ?? (args[1].endsWith('@latest') ? '0.28.0' : args[1].split('@').at(-1))));
     } else if (args[0] === 'install') {
       if (options.installFailure) { console.error('::warning::untrusted npm output'); process.exit(1); }
       const dir = args[args.indexOf('--prefix') + 1];
@@ -59,14 +59,14 @@ async function fixture(t, options = {}) {
   };
 }
 
-for (const [requested, expected] of [['', '0.26.0'], ['0.26.1', '0.26.1'], ['latest', '0.27.0']]) {
+for (const [requested, expected] of [['', '0.27.1'], ['0.27.2', '0.27.2'], ['0.28.0', '0.28.0'], ['1.0.0', '1.0.0'], ['latest', '0.28.0']]) {
   test(`installs ${requested || 'the default'} as the exact official CLI version ${expected}`, async t => {
     const f = await fixture(t, { requested });
     const result = f.run();
     assert.equal(result.status, 0, result.stderr);
     const calls = await f.calls();
     assert.equal(calls.length, 2);
-    assert.deepEqual(calls[0].args.slice(0, 4), ['view', `@guildai/cli@${requested || '0.26.0'}`, 'version', '--json']);
+    assert.deepEqual(calls[0].args.slice(0, 4), ['view', `@guildai/cli@${requested || '0.27.1'}`, 'version', '--json']);
     assert.equal(calls[1].args[0], 'install');
     assert.equal(calls[1].args.at(-1), `@guildai/cli@${expected}`);
     const outputs = Object.fromEntries((await f.output()).trim().split('\n').map(line => line.split('=')));
@@ -76,7 +76,7 @@ for (const [requested, expected] of [['', '0.26.0'], ['0.26.1', '0.26.1'], ['lat
   });
 }
 
-for (const requested of ['0.25.9', '0.26.0-beta.1', './cli', 'https://example.invalid/cli.tgz', '^0.26.0', '>=0.26.0', '--help', '@other/cli@0.26.0', '01.26.0', '0.26.0\nentrypoint=injected']) {
+for (const requested of ['0.25.9', '0.26.0', '0.26.99', '0.27.0', '0.27.1-beta.1', './cli', 'https://example.invalid/cli.tgz', '^0.27.1', '>=0.27.1', '--help', '@other/cli@0.27.1', '01.27.1', '0.27.1\nentrypoint=injected']) {
   test(`rejects unsafe or unsupported CLI selector ${JSON.stringify(requested)} before npm`, async t => {
     const f = await fixture(t, { requested });
     const result = f.run();
@@ -88,9 +88,9 @@ for (const requested of ['0.25.9', '0.26.0-beta.1', './cli', 'https://example.in
 }
 
 for (const [name, options] of [
-  ['latest below the supported floor', { requested: 'latest', resolved: '0.25.9' }],
+  ['latest below the supported floor', { requested: 'latest', resolved: '0.27.0' }],
   ['latest prerelease', { requested: 'latest', resolved: '0.27.0-beta.1' }],
-  ['mismatched registry version', { requested: '0.26.1', resolved: '0.26.2' }],
+  ['mismatched registry version', { requested: '0.27.1', resolved: '0.27.2' }],
   ['malformed registry output', { resolved: { version: '0.26.0' } }],
   ['newline registry output', { resolved: '0.26.0\nentrypoint=injected' }],
   ['mismatched installed package', { installed: '0.25.9' }],

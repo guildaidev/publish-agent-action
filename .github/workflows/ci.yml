@@ -48,7 +48,7 @@ jobs:
           VERSION_ID: ${{ steps.missing-key.outputs.version-id }}
           SOURCE_VERSION: ${{ steps.missing-key.outputs.version }}
         run: |
-          test "$CLI_VERSION" = '0.26.0'
+          test "$CLI_VERSION" = '0.27.1'
           test "$ACTION_OUTCOME" = 'failure'
           test "$FAILURE_REASON" = 'missing-api-key'
           test -z "$AGENT_ID$VERSION_ID$SOURCE_VERSION"

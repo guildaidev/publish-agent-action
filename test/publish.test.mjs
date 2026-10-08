@@ -34,8 +34,10 @@ async function fixture(t, options = {}) {
       config: process.env.GUILD_CONFIG_DIR, key: process.env.GUILD_API_KEY
     }) + '\\n');
     const agent = { id: '11111111-1111-4111-8111-111111111111',
-      full_name: 'myorg~example', is_public: false };
+      full_name: 'myorg~example', is_public: process.env.TEST_PUBLIC === 'true', agent_type: 'GOOSE' };
     if (args.includes('get')) {
+      if (process.env.TEST_FAILURE === 'target-null') { console.log('null'); process.exit(0); }
+      if (process.env.TEST_MISSING === 'true') { console.error('Target unavailable'); process.exit(1); }
       if (process.env.TEST_FAILURE === 'lookup') { console.error('Target unavailable'); process.exit(1); }
       if (process.env.TEST_FAILURE === 'target') agent.full_name = 'myorg~other';
       if (process.env.TEST_FAILURE === 'target-id') agent.id = 'bad-id';
@@ -43,6 +45,8 @@ async function fixture(t, options = {}) {
       console.log(JSON.stringify(agent));
     }
     else if (args.includes('save')) {
+      if (process.env.TEST_MISSING === 'true' && !args.includes('--create-if-missing')) process.exit(1);
+      if (process.env.TEST_RESOLVE_FAILURE) { console.error(process.env.TEST_RESOLVE_FAILURE); process.exit(1); }
       if (process.env.TEST_FAILURE === 'command') {
         console.error('##[warning]untrusted annotation');
         console.error('::warning::untrusted annotation');
@@ -54,12 +58,13 @@ async function fixture(t, options = {}) {
       if (process.env.TEST_FAILURE === 'json') { console.log('not-json'); process.exit(0); }
       if (process.env.TEST_FAILURE === 'duplicate') { console.error('Version already published'); process.exit(1); }
       const version = { id: '22222222-2222-4222-8222-222222222222',
-        version_number: '1.2.3', status: 'PUBLISHED', validation_status: 'PASSED', agent };
+        version_number: args[args.indexOf('--version-number') + 1], status: 'PUBLISHED', validation_status: 'PASSED', agent };
       if (process.env.TEST_FAILURE === 'status') version.status = 'DRAFT';
       if (process.env.TEST_FAILURE === 'validation') version.validation_status = 'FAILED';
       if (process.env.TEST_FAILURE === 'version') version.version_number = '9.9.9';
       if (process.env.TEST_FAILURE === 'agent') version.agent.id = 'wrong-agent';
       if (process.env.TEST_FAILURE === 'visibility') version.agent.is_public = true;
+      if (process.env.TEST_FAILURE === 'type') version.agent.agent_type = 'GUILD_TYPESCRIPT';
       console.log(JSON.stringify({ version }));
     } else { process.exit(3); }
   `);
@@ -74,11 +79,13 @@ async function fixture(t, options = {}) {
     GITHUB_SHA: 'abc123',
     GUILD_API_KEY: key,
     GUILD_PUBLISH_CLI: cli,
-    GUILD_PUBLISH_CLI_VERSION: '0.26.0',
+    GUILD_PUBLISH_CLI_VERSION: '0.27.1',
     GUILD_PUBLISH_PATH: 'agents/example with spaces',
     GUILD_PUBLISH_AGENT: 'myorg~example',
     GUILD_PUBLISH_VERSION: '',
     GUILD_PUBLISH_OVERWRITE: 'false',
+    GUILD_PUBLISH_CREATE_IF_MISSING: 'false',
+    GUILD_PUBLISH_AGENT_TYPE: '',
     GUILDCORE_URL: 'https://should-not-receive-key.invalid/api',
     GUILD_USE_SHARED: '1',
     GUILD_USE_LOCAL: '1',
@@ -147,6 +154,11 @@ for (const [name, env, options] of [
   ['missing target', { GUILD_PUBLISH_AGENT: '' }],
   ['malformed target', { GUILD_PUBLISH_AGENT: 'myorg~example; echo unsafe' }],
   ['ambiguous overwrite setting', { GUILD_PUBLISH_OVERWRITE: 'yes' }],
+  ['ambiguous creation setting', { GUILD_PUBLISH_CREATE_IF_MISSING: 'yes' }],
+  ['creation without a type', { GUILD_PUBLISH_CREATE_IF_MISSING: 'true' }],
+  ['type without creation consent', { GUILD_PUBLISH_AGENT_TYPE: 'GOOSE' }],
+  ['unsupported creation type', { GUILD_PUBLISH_CREATE_IF_MISSING: 'true', GUILD_PUBLISH_AGENT_TYPE: 'goose; echo unsafe' }],
+  ['uppercase creation target', { GUILD_PUBLISH_CREATE_IF_MISSING: 'true', GUILD_PUBLISH_AGENT_TYPE: 'GOOSE', GUILD_PUBLISH_AGENT: 'MyOrg~example' }],
   ['missing version', {}, { fileVersion: null }],
   ['invalid version', {}, { fileVersion: 'not-a-version' }],
   ['mismatched explicit version', { GUILD_PUBLISH_VERSION: '2.0.0' }],
@@ -212,7 +224,7 @@ for (const failure of ['json', 'status', 'validation', 'version', 'agent', 'visi
   });
 }
 
-for (const failure of ['lookup', 'target', 'target-id', 'target-visibility']) {
+for (const failure of ['lookup', 'target', 'target-id', 'target-visibility', 'target-null']) {
   test(`refuses ${failure} before saving and cleans up isolated state`, async t => {
     const f = await fixture(t, { env: { TEST_FAILURE: failure } });
     assert.notEqual(f.run().status, 0);
@@ -236,14 +248,90 @@ test('duplicate published version fails once without success outputs or leftover
 });
 
 test('summary reports the actual verified installed CLI version', async t => {
-  const f = await fixture(t, { env: { GUILD_PUBLISH_CLI_VERSION: '0.26.1' } });
+  const f = await fixture(t, { env: { GUILD_PUBLISH_CLI_VERSION: '0.27.2' } });
   assert.equal(f.run().status, 0);
-  assert.match(await readFile(f.env.GITHUB_STEP_SUMMARY, 'utf8'), /Guild CLI: `0\.26\.1`/);
+  assert.match(await readFile(f.env.GITHUB_STEP_SUMMARY, 'utf8'), /Guild CLI: `0\.27\.2`/);
 });
 
 test('unvalidated CLI version cannot inject summary content or reach Guild', async t => {
   const f = await fixture(t, { env: { GUILD_PUBLISH_CLI_VERSION: 'latest\ninjected' } });
   assert.notEqual(f.run().status, 0);
   assert.deepEqual(await f.calls(), []);
+  assert.equal(await f.output(), '');
+});
+
+const creation = { GUILD_PUBLISH_CREATE_IF_MISSING: 'true', GUILD_PUBLISH_AGENT_TYPE: 'GOOSE' };
+
+test('opt-in first release delegates private creation and exact version to the CLI without overwrite', async t => {
+  const f = await fixture(t, { fileVersion: '1.0.0', env: { ...creation, TEST_MISSING: 'true' } });
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  const calls = await f.calls();
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].args, ['--mode', 'json', 'agent', 'save', 'myorg~example',
+    '--path', f.source, '--version-number', '1.0.0', '--no-bump', '--publish',
+    '--message', 'GitHub Actions release from myorg/agent-source@abc123', '--create-if-missing', '--agent-type', 'GOOSE']);
+  assert.match(await f.output(), /version=1\.0\.0\n/);
+  assert.match(await readFile(f.env.GITHUB_STEP_SUMMARY, 'utf8'), /Visibility: private/);
+  await assert.rejects(realpath(calls[1].state), { code: 'ENOENT' });
+});
+
+test('creation opt-in updates the same existing public agent without changing visibility', async t => {
+  const f = await fixture(t, { fileVersion: '1.0.1', env: { ...creation, TEST_PUBLIC: 'true', GUILD_PUBLISH_OVERWRITE: 'true' } });
+  const result = f.run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(await f.output(), /^agent-id=11111111-1111-4111-8111-111111111111\n/);
+  assert.match(await f.output(), /version=1\.0\.1\n/);
+  assert.match(await readFile(f.env.GITHUB_STEP_SUMMARY, 'utf8'), /Visibility: public \(unchanged\)/);
+  assert.ok((await f.calls())[1].args.includes('--force'));
+});
+
+test('missing agent without explicit creation opt-in never reaches save', async t => {
+  const f = await fixture(t, { env: { TEST_MISSING: 'true' } });
+  assert.notEqual(f.run().status, 0);
+  assert.equal((await f.calls()).length, 1);
+  assert.equal(await f.output(), '');
+});
+
+for (const failure of ['visibility', 'agent', 'type']) {
+  test(`first release rejects unexpected ${failure} instead of reporting creation success`, async t => {
+    const f = await fixture(t, { env: { ...creation, TEST_MISSING: 'true', TEST_FAILURE: failure } });
+    assert.notEqual(f.run().status, 0);
+    assert.equal((await f.calls()).length, 2);
+    assert.equal(await f.output(), '');
+  });
+}
+
+for (const failure of ['Forbidden', 'Unauthorized', 'Connection refused', 'Server error']) {
+  test(`creation resolver ${failure} is surfaced without retry or an alternate mutation`, async t => {
+    const f = await fixture(t, { env: { ...creation, TEST_MISSING: 'true', TEST_RESOLVE_FAILURE: failure } });
+    const result = f.run();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, new RegExp(failure));
+    assert.equal((await f.calls()).length, 2);
+    assert.equal(await f.output(), '');
+  });
+}
+
+test('failed initial validation is not retried or automatically deleted', async t => {
+  const f = await fixture(t, { env: { ...creation, TEST_MISSING: 'true', TEST_FAILURE: 'save' } });
+  const result = f.run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Validation failed/);
+  assert.equal((await f.calls()).length, 2);
+  assert.equal(await f.output(), '');
+});
+
+test('creation consent does not bypass an existing target type mismatch', async t => {
+  const f = await fixture(t, { env: { ...creation, GUILD_PUBLISH_AGENT_TYPE: 'GUILD_TYPESCRIPT' } });
+  assert.notEqual(f.run().status, 0);
+  assert.equal((await f.calls()).length, 1);
+  assert.equal(await f.output(), '');
+});
+
+test('malformed successful lookup is not treated as absence when creation is enabled', async t => {
+  const f = await fixture(t, { env: { ...creation, TEST_FAILURE: 'target-null' } });
+  assert.notEqual(f.run().status, 0);
+  assert.equal((await f.calls()).length, 1);
   assert.equal(await f.output(), '');
 });

@@ -1,11 +1,12 @@
 <!-- Copyright 2026 Guild.ai; SPDX-License-Identifier: Apache-2.0 -->
 # Publish Agent to Guild
 
-Publish an existing Guild agent from a repository directory. This Action uploads
+Publish a Guild agent from a repository directory. This Action uploads
 source, waits for Guild validation, and confirms the exact published version and
-unchanged visibility. It uses the Guild CLI and production API.
+visibility. It uses the Guild CLI and production API. Missing agents can be
+created privately with explicit opt-in.
 
-Create the target agent in Guild first. Put a stable version in the source
+Put a stable version in the source
 directory's `VERSION` file or `package.json`, and store an **Agents: Write** account
 API key as the repository secret `GUILD_API_KEY`. That key can write agents across
 the account; it is not restricted to the target agent.
@@ -65,15 +66,42 @@ in this repository. Separate repositories must coordinate releases themselves.
 independent Guild editor changes. It maps to CLI `--force`, which can be needed
 for a fresh checkout. It cannot replace an already published version number.
 
+### First release without creating the agent beforehand
+
+Add these inputs to the publishing step and set `VERSION` to `1.0.0` (or set the
+package version / `version` input). Use the type that matches your package:
+
+```yaml
+with:
+  path: agents/example
+  agent: myorg~example
+  create-if-missing: 'true'
+  agent-type: GOOSE
+  overwrite: 'true' # Explicit repo-authoritative updates on subsequent releases.
+```
+
+The CLI resolves the target, creates it **privately only on a 404**, and publishes
+the specified version. Other lookup errors are not permission to create an agent.
+If it already exists, it must have the specified type and ordinary save conflict
+checks apply. Creation consent alone does not enable `--force`. For later releases,
+keep the same target and bump the source version, for example to `1.0.1`.
+
+Creation and publication are not transactional. Failed validation can leave a
+private, unpublished agent; inspect it before retrying. The Action does not delete
+it, retry publication, generate version numbers, or change visibility. Double-check
+the target spelling before enabling creation.
+
 ## Inputs and outputs
 
 | Input | Meaning |
 | --- | --- |
 | `path` | Required agent source directory inside the checkout, including symlinks. |
-| `agent` | Required existing `owner~name` agent. |
+| `agent` | Required `owner~name` agent; must exist unless creation is explicitly enabled. |
 | `version` | Optional stable `MAJOR.MINOR.PATCH`. Otherwise read `VERSION` or `package.json`. All supplied values must agree. |
 | `overwrite` | `false` by default. Explicit `true` permits CLI `--force`. |
-| `cli-version` | `0.26.0` by default. An exact stable version at least `0.26.0`, or the explicit tag `latest`. |
+| `create-if-missing` | `false` by default. Explicit `true` delegates private creation to the CLI; requires `agent-type` and a lowercase target. |
+| `agent-type` | Only with `create-if-missing`: `GUILD_TYPESCRIPT`, `GUILD_NATIVE`, `GOOSE`, `OPENCLAW`, or `LANGGRAPH`. Must match an existing target. |
+| `cli-version` | `0.27.1` by default. An exact stable version at least `0.27.1`, or the explicit tag `latest`. |
 
 Outputs after confirmed publication are `agent-id`, `version-id`, and `version`.
 `cli-version` reports the verified installed CLI version, including when later
@@ -81,9 +109,9 @@ publication fails. `failure-reason` is `missing-api-key` when the key is absent
 and the publishing step fails before contacting Guild; it is empty otherwise.
 No successful-publication outputs are emitted on failure.
 
-The **Action release** (`v1` or a commit SHA), **CLI version** (`0.26.0`), and
+The **Action release** (`v1` or a commit SHA), **CLI version** (`0.27.1`), and
 **agent source version** (for example `1.2.3`) are separate values. To override
-the CLI, add `cli-version: '0.26.1'` or `cli-version: latest` to `with`. `latest`
+the CLI, set `cli-version` to another published stable version or `latest`. `latest`
 resolves once and installs that exact stable version. Ranges, prereleases, URLs,
 paths, and alternative packages are rejected. The minimum version does not
 guarantee compatibility with future CLI releases; test overrides before using
@@ -91,13 +119,18 @@ them for production releases.
 
 ## Behavior and limits
 
-- Publishes to an existing agent without requiring a prior clone or `guild.json`.
-  It does not create missing agents or automatically bump versions.
+- Publishes without requiring a prior clone or `guild.json`. Missing agents are
+  an error unless `create-if-missing` and `agent-type` are provided. Every release,
+  including the first, requires a source version or explicit `version` input.
 - Uses one-way publication and preserves visibility. The Action issues no
   workspace upgrades; existing Guild auto-update settings still apply and may
   move workspace installations to the newly published version.
 - Adds no publication retries. After failure or timeout, inspect Guild and the
   logs before retrying; publication may have progressed before a connection failed.
+- Checks the existing target's ID and visibility before publishing. If lookup
+  fails with creation enabled, the CLI's save resolver decides whether creation
+  is permitted. Without preflight evidence, the Action only confirms a private
+  result; inspect Guild if that final check fails after publication.
 - Uses the CLI's file filtering, including the source directory's `.gitignore`
   and mandatory local-file exclusions. Review the selected source directory.
 - Supports GitHub-hosted Ubuntu runners with Node.js 22. The wrapper does not
@@ -124,11 +157,13 @@ composite without a key and separately checks installation and authentication
 rejection.
 
 The `Authenticated smoke` workflow is a post-merge test on `main`. It requires a
-dedicated existing test agent in `GUILD_TEST_AGENT`, a test account key in the
-`GUILD_TEST_API_KEY` secret, two different new source versions, and explicit
-overwrite consent. It publishes a generic Goose fixture, checks rejection of
-invalid source, and verifies the working version remains the agent's latest
-published selection. Missing configuration fails visibly. Authenticated
+dedicated **unused** `owner~name` in `GUILD_TEST_AGENT`, a test account key in the
+`GUILD_TEST_API_KEY` secret, and explicit creation/update consent. It creates a
+private Goose agent at `1.0.0`, updates the same agent to `1.0.1`, rejects duplicate
+`1.0.1` and invalid `1.0.2` releases, then verifies private visibility, both valid
+versions, failed validation evidence, and the unchanged working publication.
+Use a new unused test name for each fresh run. Test artifacts are left in Guild
+for inspection, not automatically deleted. Missing configuration fails visibly. Authenticated
 validation remains pending until a
 successful configured run; credential-free tests do not establish it.
 
