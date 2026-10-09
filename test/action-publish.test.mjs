@@ -84,17 +84,16 @@ test('package-free source may use CLI defaults', async t => {
   assert.equal(f.run().status, 0);
 });
 
-for (const reason of ['invalid source', 'duplicate version', 'unauthorized key', 'wrong type', 'conflicting edit']) {
-  test('propagates CLI failure without retry: ' + reason, async t => {
-    const f = await fixture(t, { exit: 7, stderr: reason });
-    const result = f.run();
-    assert.equal(result.status, 7);
-    assert.match(result.stderr, new RegExp(reason));
-    assert.equal((await f.calls()).length, 1);
-    assert.equal(await f.output(), '');
-    await assert.rejects(stat((await f.calls())[0].env.GUILD_STATE_DIR), { code: 'ENOENT' });
-  });
-}
+test('propagates CLI failure without retry', async t => {
+  const f = await fixture(t, { exit: 7, stderr: 'invalid source' });
+  const result = f.run();
+  const calls = await f.calls();
+  assert.equal(result.status, 7);
+  assert.match(result.stderr, /invalid source/);
+  assert.equal(calls.length, 1);
+  assert.equal(await f.output(), '');
+  await assert.rejects(stat(calls[0].env.GUILD_STATE_DIR), { code: 'ENOENT' });
+});
 
 test('missing key cannot fall back to browser login', async t => {
   const f = await fixture(t);

@@ -34,7 +34,7 @@ async function fixture(t, version = '0.27.1', fail = false) {
       cwd: root, encoding: 'utf8', env: {
         PATH: path.join(dir, 'bin') + path.delimiter + process.env.PATH, HOME: dir,
         GITHUB_OUTPUT: path.join(dir, 'output'), RUNNER_TEMP: dir,
-        GUILD_PUBLISH_CLI_VERSION: selector, GUILD_PUBLISH_ACTION_PATH: root,
+        GUILD_PUBLISH_CLI_VERSION: selector,
         GUILD_API_KEY: step.env.GUILD_API_KEY, NODE_AUTH_TOKEN: step.env.NODE_AUTH_TOKEN,
       },
     }),
