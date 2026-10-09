@@ -2,10 +2,12 @@
 # Maintaining the Action
 
 Before merging or releasing, review changes to subprocess arguments, npm inputs,
-credential isolation, workflow-command neutralization, and success verification.
+credential isolation, workflow-command neutralization, and CLI output mapping.
 Keep third-party Actions pinned to reviewed full SHAs. Use the same root composite
 in examples and smoke tests. Creation is delegated to the shipped CLI 0.27.1+
 resolver, never a second create implementation or a parsed error-message heuristic.
+Version selection, validation and publication also stay in the CLI. Do not add
+Action-specific release policies when the CLI already provides them.
 
 Run:
 

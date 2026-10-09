@@ -1,154 +1,80 @@
 // Copyright 2026 Guild.ai
 // SPDX-License-Identifier: Apache-2.0
-import { appendFile, mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { appendFile, mkdtemp, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const env = process.env;
 const key = env.GUILD_API_KEY?.trim();
-const stableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-const uuid = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
-const unresolvedTarget = Symbol('unresolved-target');
 
-function redact(text) {
-  let result = String(text);
+// Build diagnostics are untrusted log text, not GitHub workflow commands.
+function log(text) {
   for (const secret of [key, key?.split(':').slice(1).join(':')]) {
-    if (secret) result = result.split(secret).join('***');
+    if (secret) text = text.split(secret).join('***');
   }
-  return result;
-}
-
-function annotation(text) {
-  return redact(text).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
-}
-
-function inside(root, target) {
-  const relative = path.relative(root, target);
-  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
-}
-
-async function sourceFile(source, name) {
-  const file = path.join(source, name);
-  let resolved;
-  try { resolved = await realpath(file); }
-  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
-  if (!inside(source, resolved)) throw new Error(`${name} must stay inside the source directory.`);
-  return readFile(resolved, 'utf8');
-}
-
-async function sourceVersion(source, explicit) {
-  const file = await sourceFile(source, 'VERSION');
-  const manifest = await sourceFile(source, 'package.json');
-  const values = [explicit, file?.trim(), manifest === null ? null : JSON.parse(manifest).version]
-    .filter(value => value !== null && value !== undefined && value !== '');
-  if (!values.length) throw new Error('Provide a VERSION file, package.json version, or the version input. No automatic version bump is performed.');
-  if (values.some(value => typeof value !== 'string' || !stableVersion.test(value))) {
-    throw new Error('Version must be stable MAJOR.MINOR.PATCH (for example 1.2.3).');
+  for (const line of text.replaceAll('\r', '').split('\n')) {
+    if (line) console.error('guild: ' + line.replaceAll('##[', '##\\['));
   }
-  if (new Set(values).size !== 1) throw new Error('The version input, VERSION file, and package.json version must agree when present.');
-  return values[0];
-}
-
-function runCli(cli, args, cliEnv, cwd, allowUnresolvedTarget = false) {
-  // Pass arguments directly, never through a shell. No source code or lifecycle
-  // script from the customer's checkout is executed by this wrapper.
-  const result = spawnSync(process.execPath, [cli, '--mode', 'json', ...args], {
-    cwd, env: cliEnv, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024,
-    timeout: 11 * 60 * 1000,
-  });
-  // Modern commands must start a line; legacy ##[...] commands can appear
-  // anywhere. Neutralize both before replaying untrusted CLI/build output.
-  for (const line of redact(result.stderr || '').replaceAll('\r', '').split('\n')) {
-    if (line) console.error(`guild: ${line.replaceAll('##[', '##\\[')}`);
-  }
-  // The get command does not expose an HTTP status in its JSON errors. With
-  // explicit creation consent, let save's existing resolver distinguish 404
-  // from auth/network failures. Never infer absence from an error message or
-  // create via a separate API fallback. Process failures still stop here.
-  if (allowUnresolvedTarget && !result.error && result.status === 1) return unresolvedTarget;
-  if (result.error || result.status !== 0) {
-    throw new Error(`Guild CLI ${args.slice(0, 2).join(' ')} failed${result.signal ? ` (${result.signal})` : ''}. Inspect the logs and Guild version before retrying; this Action does not retry publication.`);
-  }
-  try { return JSON.parse(result.stdout); }
-  catch { throw new Error('Guild CLI did not return a JSON result. Publication is not confirmed. Inspect Guild before retrying.'); }
 }
 
 async function main() {
-  if (!key) throw Object.assign(new Error('Set GUILD_API_KEY to a Guild account API key with Agents: Write. Browser login is not used by this Action.'), { code: 'MISSING_API_KEY' });
-  const cliVersion = env.GUILD_PUBLISH_CLI_VERSION;
-  if (!cliVersion || !stableVersion.test(cliVersion)) throw new Error('The Action must supply the verified installed CLI version.');
-  const agent = env.GUILD_PUBLISH_AGENT?.trim();
-  if (!agent || !/^[a-zA-Z0-9_.-]{1,100}~[a-zA-Z0-9_.-]{1,100}$/.test(agent)) {
-    throw new Error('agent must be an explicit owner~name for the target Guild agent.');
+  if (!key) {
+    await appendFile(env.GITHUB_OUTPUT, 'failure-reason=missing-api-key\n');
+    throw new Error('Set GUILD_API_KEY to an account API key with Agents: Write. Browser login is not used.');
   }
-  const overwrite = env.GUILD_PUBLISH_OVERWRITE || 'false';
-  if (!['true', 'false'].includes(overwrite)) throw new Error('overwrite must be true or false.');
-  const createIfMissing = env.GUILD_PUBLISH_CREATE_IF_MISSING || 'false';
-  if (!['true', 'false'].includes(createIfMissing)) throw new Error('create-if-missing must be true or false.');
-  const agentType = env.GUILD_PUBLISH_AGENT_TYPE?.trim();
-  if (createIfMissing === 'true') {
-    if (!/^[a-z0-9_.-]{1,100}~[a-z0-9_.-]{1,100}$/.test(agent)) {
-      throw new Error('Creation requires a lowercase owner~name, with each part at most 100 characters.');
-    }
-    if (!['GUILD_TYPESCRIPT', 'GUILD_NATIVE', 'GOOSE', 'OPENCLAW', 'LANGGRAPH'].includes(agentType)) {
-      throw new Error('create-if-missing requires agent-type: GUILD_TYPESCRIPT, GUILD_NATIVE, GOOSE, OPENCLAW, or LANGGRAPH.');
-    }
-  } else if (agentType) throw new Error('agent-type is only used with create-if-missing.');
-  if (!env.GUILD_PUBLISH_PATH?.trim()) throw new Error('path must name the agent source directory.');
-  if (!env.GITHUB_WORKSPACE || !env.RUNNER_TEMP || !env.GITHUB_OUTPUT || !env.GITHUB_STEP_SUMMARY || !env.GUILD_PUBLISH_CLI) {
-    throw new Error('Run this script through the Guild publishing Action in GitHub Actions.');
+  if (!env.GUILD_PUBLISH_PATH?.trim() || !env.GUILD_PUBLISH_AGENT?.trim()) {
+    throw new Error('path and agent are required.');
+  }
+  // Values must not become options, including the CLI's global environment flags.
+  for (const name of ['GUILD_PUBLISH_AGENT', 'GUILD_PUBLISH_VERSION', 'GUILD_PUBLISH_AGENT_TYPE']) {
+    if (env[name]?.trimStart().startsWith('-')) throw new Error(name + ' must not start with "-".');
+  }
+  for (const name of ['GUILD_PUBLISH_OVERWRITE', 'GUILD_PUBLISH_CREATE_IF_MISSING']) {
+    if (!['true', 'false'].includes(env[name] || 'false')) throw new Error(name + ' must be true or false.');
   }
   const workspace = await realpath(env.GITHUB_WORKSPACE);
   const source = await realpath(path.resolve(workspace, env.GUILD_PUBLISH_PATH));
-  if (!inside(workspace, source)) throw new Error('path must stay inside the checked-out repository, including symlinks (checkout boundary).');
-  if (!(await stat(source)).isDirectory()) throw new Error('path must be a directory.');
-  const version = await sourceVersion(source, env.GUILD_PUBLISH_VERSION?.trim());
-  const releaseSource = `${env.GITHUB_REPOSITORY || 'local-source'}@${env.GITHUB_SHA || 'unknown'}`;
-  // Metadata is one line and passed as an argument, not interpolated in shell.
-  if (/[\r\n]/.test(releaseSource)) throw new Error('Source repository and commit metadata must be single-line values.');
-  const stateDir = await mkdtemp(path.join(env.RUNNER_TEMP, 'guild-publish-state-'));
+  const relative = path.relative(workspace, source);
+  if (relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) {
+    throw new Error('path must stay inside the checked-out repository.');
+  }
+  const args = ['--mode', 'json', 'agent', 'save', env.GUILD_PUBLISH_AGENT, '--path', source,
+    '--no-bump', '--publish', '--message',
+    `GitHub Actions release from ${env.GITHUB_REPOSITORY}@${env.GITHUB_SHA}`];
+  if (env.GUILD_PUBLISH_VERSION) args.push('--version-number', env.GUILD_PUBLISH_VERSION);
+  if (env.GUILD_PUBLISH_CREATE_IF_MISSING === 'true') args.push('--create-if-missing');
+  if (env.GUILD_PUBLISH_AGENT_TYPE) args.push('--agent-type', env.GUILD_PUBLISH_AGENT_TYPE);
+  if (env.GUILD_PUBLISH_OVERWRITE === 'true') args.push('--force');
+
+  const state = await mkdtemp(path.join(env.RUNNER_TEMP, 'guild-publish-'));
   try {
     const cliEnv = { ...env, GUILD_API_KEY: key, GUILDCORE_URL: 'https://app.guild.ai/api',
-      GUILD_STATE_DIR: stateDir, GUILD_CONFIG_DIR: stateDir, CI: 'true', NO_COLOR: '1' };
+      GUILD_STATE_DIR: state, GUILD_CONFIG_DIR: state, CI: 'true', NO_COLOR: '1' };
     delete cliEnv.GUILD_USE_SHARED;
     delete cliEnv.GUILD_USE_LOCAL;
-    const lookup = runCli(env.GUILD_PUBLISH_CLI, ['agent', 'get', agent], cliEnv, workspace, createIfMissing === 'true');
-    if (lookup !== unresolvedTarget && (!lookup || lookup.full_name !== agent || !uuid.test(lookup.id || '') || typeof lookup.is_public !== 'boolean')) {
-      throw new Error('Guild returned an unexpected target agent; nothing was published.');
+    // One CLI call owns resolution, creation, versioning, validation and publish.
+    const result = spawnSync('guild', args, { cwd: workspace, env: cliEnv, encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024, timeout: 11 * 60 * 1000 });
+    log(result.stderr || '');
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      log(result.stdout || '');
+      process.exitCode = result.status || 1;
+      return;
     }
-    const before = lookup === unresolvedTarget ? null : lookup;
-    if (before && agentType && before.agent_type !== agentType) throw new Error('The existing agent type does not match agent-type; nothing was published.');
-    const args = ['agent', 'save', agent, '--path', source, '--version-number', version,
-      '--no-bump', '--publish', '--message', `GitHub Actions release from ${releaseSource}`];
-    if (createIfMissing === 'true') args.push('--create-if-missing', '--agent-type', agentType);
-    if (overwrite === 'true') args.push('--force');
-    const result = runCli(env.GUILD_PUBLISH_CLI, args, cliEnv, workspace).version;
-    if (!result || result.status !== 'PUBLISHED' || result.validation_status !== 'PASSED' ||
-        result.version_number !== version || !uuid.test(result.id || '') ||
-        !uuid.test(result.agent?.id || '') || result.agent.full_name !== agent ||
-        (before && result.agent.id !== before.id) ||
-        result.agent.is_public !== (before?.is_public ?? false) ||
-        (agentType && result.agent.agent_type !== agentType)) {
-      throw new Error('Guild did not confirm the requested published version, validation, target, and unchanged visibility. Inspect Guild before retrying.');
+    const { version } = JSON.parse(result.stdout);
+    const outputs = { 'agent-id': version?.agent?.id, 'version-id': version?.id, version: version?.version_number };
+    if (Object.values(outputs).some(value => typeof value !== 'string' || !value || /[\r\n]/.test(value))) {
+      throw new Error('CLI returned no version identifiers. Inspect Guild before retrying.');
     }
-    await appendFile(env.GITHUB_OUTPUT, `agent-id=${result.agent.id}\nversion-id=${result.id}\nversion=${version}\n`);
-    const summary = `### Published ${agent}@${version}\n\n` +
-      `- Version ID: \`${result.id}\`\n- Target: Guild prod\n` +
-      `- Visibility: ${result.agent.is_public ? 'public' : 'private'} (${before ? 'unchanged' : 'private target verified'})\n` +
-      `- Create-if-missing consent: ${createIfMissing}\n` +
-      `- Validation: passed\n- Overwrite consent: ${overwrite}\n- Guild CLI: \`${cliVersion}\`\n` +
-      `- Source: \`${releaseSource}\`\n`;
-    await appendFile(env.GITHUB_STEP_SUMMARY, summary);
-    console.log(`Published ${agent}@${version} (${result.id}).`);
+    await appendFile(env.GITHUB_OUTPUT, Object.entries(outputs).map(([name, value]) => `${name}=${value}\n`).join(''));
+    log(`Published ${env.GUILD_PUBLISH_AGENT}@${version.version_number} (${version.id}).`);
   } finally {
-    await rm(stateDir, { recursive: true, force: true });
+    await rm(state, { recursive: true, force: true });
   }
 }
 
-main().catch(async error => {
-  if (error.code === 'MISSING_API_KEY' && env.GITHUB_OUTPUT) {
-    await appendFile(env.GITHUB_OUTPUT, 'failure-reason=missing-api-key\n');
-  }
-  console.error(`::error::${annotation(error.message)}`);
+main().catch(error => {
+  log(error.message);
   process.exitCode = 1;
 });

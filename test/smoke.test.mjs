@@ -1,7 +1,7 @@
 // Copyright 2026 Guild.ai
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -16,7 +16,7 @@ async function fixture(t, options = {}) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'guild-smoke-test-')));
   t.after(() => rm(root, { recursive: true, force: true }));
   const callsFile = path.join(root, 'calls');
-  const cli = path.join(root, 'cli.mjs');
+  const cli = path.join(root, 'guild');
   if (!options.missingState) {
     await mkdir(path.join(root, '.smoke/invalid/.guild'), { recursive: true });
     await writeFile(path.join(root, '.smoke/invalid/.guild/state.json'), JSON.stringify({
@@ -24,7 +24,7 @@ async function fixture(t, options = {}) {
       files: {},
     }));
   }
-  await writeFile(cli, `
+  await writeFile(cli, `#!${process.execPath}
     import { appendFileSync } from 'node:fs';
     const options = ${JSON.stringify(options)};
     const args = process.argv.slice(2);
@@ -55,11 +55,12 @@ async function fixture(t, options = {}) {
       console.log(JSON.stringify({ items, pagination: { limit: 100, offset: 0, total: items.length } }));
     } else { process.exit(3); }
   `);
+  await chmod(cli, 0o755);
   return {
     root,
     run: () => spawnSync(process.execPath, ['--input-type=module'], {
       input: verification, encoding: 'utf8', cwd: root, env: {
-        PATH: process.env.PATH, RUNNER_TEMP: root, GUILD_PUBLISH_CLI: cli,
+        PATH: root + path.delimiter + process.env.PATH, RUNNER_TEMP: root,
         GUILD_API_KEY: 'synthetic-id:synthetic-secret', TEST_AGENT: 'myorg~example',
         VALID_VERSION_ID: '22222222-2222-4222-8222-222222222222',
         INITIAL_VERSION_ID: '44444444-4444-4444-8444-444444444444',
@@ -89,7 +90,6 @@ test('duplicate smoke uploads changed source from a fresh directory, not the pri
   const duplicate = path.resolve(f.root, duplicatePath);
   await mkdir(path.join(valid, '.guild'));
   await writeFile(path.join(valid, '.guild/state.json'), '{"base_version_id":"previous-save"}');
-  assert.equal((await readFile(path.join(duplicate, 'VERSION'), 'utf8')).trim(), '1.0.1');
   assert.notEqual(await readFile(path.join(duplicate, 'recipe.yaml'), 'utf8'), await readFile(path.join(valid, 'recipe.yaml'), 'utf8'));
   await assert.rejects(readFile(path.join(duplicate, '.guild/state.json')), { code: 'ENOENT' });
 });

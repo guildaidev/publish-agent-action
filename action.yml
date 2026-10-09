@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 name: Publish Agent to Guild
 author: Guild.ai
-description: Publish a Guild agent from source with explicit versioning, optional private creation, and overwrite consent.
+description: Upload, validate, and publish an agent using the Guild CLI.
 branding:
   icon: upload-cloud
   color: purple
@@ -15,7 +15,7 @@ inputs:
     description: Target agent in owner~name form. Must exist unless create-if-missing is true.
     required: true
   version:
-    description: Stable MAJOR.MINOR.PATCH; optional when VERSION or package.json supplies it. All supplied versions must agree.
+    description: Optional --version-number override. Otherwise use the CLI's --no-bump version behavior.
     required: false
     default: ''
   overwrite:
@@ -37,13 +37,13 @@ inputs:
 
 outputs:
   agent-id:
-    description: Guild ID of the target agent, available after confirmed publication.
+    description: Agent ID returned by a successful CLI save.
     value: ${{ steps.publish.outputs.agent-id }}
   version-id:
-    description: Exact published Guild version ID.
+    description: Version ID returned by a successful CLI save.
     value: ${{ steps.publish.outputs.version-id }}
   version:
-    description: Published source version.
+    description: Version number returned by a successful CLI save.
     value: ${{ steps.publish.outputs.version }}
   failure-reason:
     description: missing-api-key when publication was refused because no key was supplied; empty otherwise.
@@ -64,23 +64,37 @@ runs:
         node-version: '22'
         package-manager-cache: false
 
-    - name: Install and verify the Guild CLI
+    - name: Install the Guild CLI
       id: cli
       shell: bash
       env:
         GUILD_API_KEY: ''
         NODE_AUTH_TOKEN: ''
-        GUILD_PUBLISH_ACTION_PATH: ${{ github.action_path }}
         GUILD_PUBLISH_CLI_VERSION: ${{ inputs.cli-version }}
-      run: node "$GUILD_PUBLISH_ACTION_PATH/scripts/install-cli.mjs"
+      run: |
+        if [[ "$GUILD_PUBLISH_CLI_VERSION" != latest && ! "$GUILD_PUBLISH_CLI_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+          echo '::error::cli-version must be an exact stable version or latest.'
+          exit 1
+        fi
+        cd "$RUNNER_TEMP"
+        npm install --global --ignore-scripts --no-audit --no-fund \
+          --registry=https://registry.npmjs.org "@guildai/cli@$GUILD_PUBLISH_CLI_VERSION"
+        installed="$(guild --version)"
+        node - "$installed" <<'JS'
+        const version = process.argv[2];
+        const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(version);
+        if (!match || !(Number(match[1]) > 0 || Number(match[2]) > 27 ||
+          (Number(match[2]) === 27 && Number(match[3]) >= 1))) {
+          throw new Error('Guild CLI must be stable 0.27.1 or newer.');
+        }
+        JS
+        echo "cli-version=$installed" >> "$GITHUB_OUTPUT"
 
     - name: Upload, validate, and publish
       id: publish
       shell: bash
       env:
         GUILD_PUBLISH_ACTION_PATH: ${{ github.action_path }}
-        GUILD_PUBLISH_CLI: ${{ steps.cli.outputs.entrypoint }}
-        GUILD_PUBLISH_CLI_VERSION: ${{ steps.cli.outputs.cli-version }}
         GUILD_PUBLISH_PATH: ${{ inputs.path }}
         GUILD_PUBLISH_AGENT: ${{ inputs.agent }}
         GUILD_PUBLISH_VERSION: ${{ inputs.version }}
