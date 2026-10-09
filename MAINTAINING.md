@@ -8,6 +8,9 @@ in examples and smoke tests. Creation is delegated to the shipped CLI 0.27.1+
 resolver, never a second create implementation or a parsed error-message heuristic.
 Version selection, validation and publication also stay in the CLI. Do not add
 Action-specific release policies when the CLI already provides them.
+Keep installation and publication as inline `run` steps in `action.yml`; the
+tests execute those steps directly. The CLI owns validation/publication timeouts;
+callers can also set a workflow job's `timeout-minutes`.
 
 Run:
 

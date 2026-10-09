@@ -1,13 +1,17 @@
 // Copyright 2026 Guild.ai
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
-const script = new URL('../scripts/publish.mjs', import.meta.url);
+const repo = new URL('../', import.meta.url).pathname;
+const parsed = spawnSync('ruby', ['-ryaml', '-rjson', '-e',
+  'puts JSON.generate(YAML.safe_load(File.read("action.yml"), aliases: true))'], { cwd: repo, encoding: 'utf8' });
+assert.equal(parsed.status, 0, parsed.stderr);
+const step = JSON.parse(parsed.stdout).runs.steps.find(step => step.id === 'publish');
 async function fixture(t, options = {}) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'publish-action-test-')));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -25,13 +29,14 @@ async function fixture(t, options = {}) {
     if (options.stderr) process.stderr.write(options.stderr);
     if (options.stdout) process.stdout.write(options.stdout);
     if (options.exit) process.exit(options.exit);
-    console.log(JSON.stringify({ version: { id: 'version-id', version_number: '1.0.1', agent: { id: 'agent-id' } } }));
+    console.log(JSON.stringify(options.result ?? { version: { id: 'version-id', version_number: '1.0.1', agent: { id: 'agent-id' } } }));
   `);
   await chmod(cli, 0o755);
   await writeFile(path.join(root, 'output'), '');
   return {
     root, source,
-    run: (overrides = {}) => spawnSync(process.execPath, [script.pathname], { encoding: 'utf8', env: {
+    // Run the actual inline step in a source-only checkout, without Action helper files.
+    run: (overrides = {}) => spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', step.run], { cwd: root, encoding: 'utf8', env: {
       PATH: path.join(root, 'bin') + path.delimiter + process.env.PATH, HOME: root,
       RUNNER_TEMP: root, GITHUB_WORKSPACE: root, GITHUB_OUTPUT: path.join(root, 'output'),
       GITHUB_REPOSITORY: 'owner/repo', GITHUB_SHA: '123abc', GUILD_API_KEY: 'test-id:test-secret',
@@ -60,6 +65,7 @@ test('one save delegates version selection to CLI without preflight or VERSION p
   assert.equal(calls[0].env.GUILDCORE_URL, 'https://app.guild.ai/api');
   assert.equal(calls[0].env.GUILD_USE_SHARED, undefined);
   assert.equal(calls[0].env.GUILD_USE_LOCAL, undefined);
+  await assert.rejects(stat(calls[0].env.GUILD_STATE_DIR), { code: 'ENOENT' });
 });
 
 test('explicit version, private creation and overwrite are passed to CLI', async t => {
@@ -86,6 +92,7 @@ for (const reason of ['invalid source', 'duplicate version', 'unauthorized key',
     assert.match(result.stderr, new RegExp(reason));
     assert.equal((await f.calls()).length, 1);
     assert.equal(await f.output(), '');
+    await assert.rejects(stat((await f.calls())[0].env.GUILD_STATE_DIR), { code: 'ENOENT' });
   });
 }
 
@@ -142,6 +149,27 @@ for (const input of ['GUILD_PUBLISH_AGENT', 'GUILD_PUBLISH_VERSION', 'GUILD_PUBL
 
 test('malformed success result cannot emit publication outputs', async t => {
   const f = await fixture(t, { stdout: 'not json\n' });
+  assert.notEqual(f.run().status, 0);
+  assert.equal(await f.output(), '');
+});
+
+for (const [name, result] of [
+  ['missing version', {}],
+  ['missing identifiers', { version: {} }],
+  ['empty identifier', { version: { agent: { id: '' }, id: 'version-id', version_number: '1.0.1' } }],
+  ['numeric identifier', { version: { agent: { id: 42 }, id: 'version-id', version_number: '1.0.1' } }],
+  ['multiline identifier', { version: { agent: { id: 'agent-id\ninjected=value' }, id: 'version-id', version_number: '1.0.1' } }],
+]) {
+  test('rejects invalid CLI output without partial outputs: ' + name, async t => {
+    const f = await fixture(t, { result });
+    assert.notEqual(f.run().status, 0);
+    assert.equal(await f.output(), '');
+    assert.equal((await f.calls()).length, 1);
+  });
+}
+
+test('rejects multiple JSON results without partial outputs', async t => {
+  const f = await fixture(t, { stdout: '{"version":{"agent":{"id":"first"},"id":"first","version_number":"1.0.0"}}\n' });
   assert.notEqual(f.run().status, 0);
   assert.equal(await f.output(), '');
 });

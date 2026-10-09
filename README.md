@@ -98,7 +98,7 @@ Outputs `agent-id`, `version-id`, and `version` come from a successful CLI save.
   before another release. Avoid triggering the same version twice.
 - The CLI owns target resolution, versioning, creation, file filtering, validation,
   conflict detection, and publication. This Action does not duplicate those policies.
-- Uses GitHub-hosted Ubuntu and Node.js 22. Installs the public npm CLI with lifecycle
+- Uses GitHub-hosted Ubuntu, its Bash and jq, and Node.js 22. Installs the public npm CLI with lifecycle
   scripts disabled and without the publishing key. It does not install agent dependencies
   or run agent code on the runner.
 - Publication uses isolated CLI login state and the fixed production API endpoint,
@@ -111,8 +111,9 @@ Outputs `agent-id`, `version-id`, and `version` come from a successful CLI save.
 
 ## Validation and release
 
-Run `node --test test/*.test.mjs`. CI also installs the real CLI and confirms
-the composite refuses a missing key.
+Run `node --test test/*.test.mjs`. Tests execute the inline install and publish
+steps in `action.yml`, substituting npm and Guild CLI calls. CI also installs the
+real CLI and confirms the composite refuses a missing key.
 
 Before an Action release, run the main-only `Authenticated smoke` workflow with a
 dedicated unused `GUILD_TEST_AGENT` and test-account `GUILD_TEST_API_KEY` secret.
