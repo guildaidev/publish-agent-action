@@ -113,6 +113,14 @@ test('CLI diagnostics cannot expose keys or inject workflow commands', async t =
   assert.ok(!logs.includes('##['));
 });
 
+test('normalizes key whitespace before authentication and log redaction', async t => {
+  const f = await fixture(t, { exit: 7, stderr: 'test-id:test-secret\ntest-secret\n' });
+  const result = f.run({ GUILD_API_KEY: ' \ttest-id:test-secret\n ' });
+  assert.equal(result.status, 7);
+  assert.ok(!(result.stdout + result.stderr).includes('test-secret'));
+  assert.equal((await f.calls())[0].env.GUILD_API_KEY, 'test-id:test-secret');
+});
+
 test('inputs stay literal arguments, never shell code', async t => {
   const f = await fixture(t);
   const value = '1.0.1; touch SHOULD_NOT_EXIST';
@@ -135,6 +143,17 @@ test('source symlink cannot escape checkout', async t => {
   await symlink(path.dirname(f.root), path.join(f.root, 'outside'));
   assert.notEqual(f.run({ GUILD_PUBLISH_PATH: 'outside' }).status, 0);
   assert.deepEqual(await f.calls(), []);
+});
+
+test('path lookup failures cannot expose keys or inject workflow commands', async t => {
+  const f = await fixture(t);
+  const result = f.run({ GUILD_PUBLISH_PATH: 'missing\n::warning::test-secret\n##[error]injected' });
+  assert.notEqual(result.status, 0);
+  assert.deepEqual(await f.calls(), []);
+  const logs = result.stdout + result.stderr;
+  assert.ok(!logs.includes('test-secret'));
+  assert.ok(!logs.includes('::warning::') && !logs.includes('##['));
+  assert.equal(await f.output(), '');
 });
 
 for (const input of ['GUILD_PUBLISH_AGENT', 'GUILD_PUBLISH_VERSION', 'GUILD_PUBLISH_AGENT_TYPE']) {

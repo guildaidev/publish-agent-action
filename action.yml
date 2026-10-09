@@ -101,7 +101,11 @@ runs:
         GUILD_PUBLISH_CREATE_IF_MISSING: ${{ inputs.create-if-missing }}
         GUILD_PUBLISH_AGENT_TYPE: ${{ inputs.agent-type }}
       run: |
-        if [[ -z "${GUILD_API_KEY:-}" || ! "$GUILD_API_KEY" =~ [^[:space:]] ]]; then
+        # Match the CLI's key normalization so diagnostics redact the same secret.
+        GUILD_API_KEY="${GUILD_API_KEY:-}"
+        GUILD_API_KEY="${GUILD_API_KEY#"${GUILD_API_KEY%%[![:space:]]*}"}"
+        export GUILD_API_KEY="${GUILD_API_KEY%"${GUILD_API_KEY##*[![:space:]]}"}"
+        if [[ -z "$GUILD_API_KEY" ]]; then
           echo 'failure-reason=missing-api-key' >> "$GITHUB_OUTPUT"
           echo '::error::Set GUILD_API_KEY to an account API key with Agents: Write. Browser login is not used.'
           exit 1
@@ -122,8 +126,11 @@ runs:
             exit 1
           fi
         done
-        workspace="$(cd -- "$GITHUB_WORKSPACE" && pwd -P)"
-        source="$(cd -- "$workspace" && cd -- "$GUILD_PUBLISH_PATH" && pwd -P)"
+        if ! workspace="$(cd -- "$GITHUB_WORKSPACE" 2>/dev/null && pwd -P)" ||
+           ! source="$(cd -- "$workspace" && cd -- "$GUILD_PUBLISH_PATH" 2>/dev/null && pwd -P)"; then
+          echo '::error::Cannot open the checkout or agent source directory.'
+          exit 1
+        fi
         case "$source" in
           "$workspace"|"$workspace"/*) ;;
           *) echo '::error::path must stay inside the checked-out repository.'; exit 1 ;;
