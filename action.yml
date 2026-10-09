@@ -1,0 +1,158 @@
+# Copyright 2026 Guild.ai
+# SPDX-License-Identifier: Apache-2.0
+name: Publish Agent to Guild
+author: Guild.ai
+description: Upload, validate, and publish an agent using the Guild CLI.
+branding:
+  icon: upload-cloud
+  color: purple
+
+inputs:
+  path:
+    description: Agent source directory inside the checked-out repository.
+    required: true
+  agent:
+    description: Target agent in owner~name form. Must exist unless create-if-missing is true.
+    required: true
+  version:
+    description: Optional --version-number override. Otherwise use the CLI's --no-bump version behavior.
+    required: false
+    default: ''
+  overwrite:
+    description: Explicitly prefer repository source over Guild edits using --force. Does not replace a published version number.
+    required: false
+    default: 'false'
+  create-if-missing:
+    description: Explicitly allow the CLI to create a missing target as a private agent. Does not imply overwrite consent.
+    required: false
+    default: 'false'
+  agent-type:
+    description: Required with create-if-missing. GUILD_TYPESCRIPT, GUILD_NATIVE, GOOSE, OPENCLAW, or LANGGRAPH; must match any existing target.
+    required: false
+    default: ''
+
+outputs:
+  agent-id:
+    description: Agent ID returned by a successful CLI save.
+    value: ${{ steps.publish.outputs.agent-id }}
+  version-id:
+    description: Version ID returned by a successful CLI save.
+    value: ${{ steps.publish.outputs.version-id }}
+  version:
+    description: Version number returned by a successful CLI save.
+    value: ${{ steps.publish.outputs.version }}
+  failure-reason:
+    description: missing-api-key when publication was refused because no key was supplied; empty otherwise.
+    value: ${{ steps.publish.outputs.failure-reason }}
+  cli-version:
+    description: Installed CLI version, available even when publication fails.
+    value: ${{ steps.cli.outputs.cli-version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+      env:
+        GUILD_API_KEY: ''
+        NODE_AUTH_TOKEN: ''
+      with:
+        node-version: '22'
+        package-manager-cache: false
+
+    - name: Install the Guild CLI
+      id: cli
+      shell: bash
+      env:
+        GUILD_API_KEY: ''
+        NODE_AUTH_TOKEN: ''
+      run: |
+        cd "$RUNNER_TEMP"
+        npm install --global --ignore-scripts --no-audit --no-fund \
+          --registry=https://registry.npmjs.org @guildai/cli@0.27.1
+        installed="$(guild --version)"
+        echo "cli-version=$installed" >> "$GITHUB_OUTPUT"
+
+    - name: Upload, validate, and publish
+      id: publish
+      shell: bash
+      env:
+        GUILD_PUBLISH_PATH: ${{ inputs.path }}
+        GUILD_PUBLISH_AGENT: ${{ inputs.agent }}
+        GUILD_PUBLISH_VERSION: ${{ inputs.version }}
+        GUILD_PUBLISH_OVERWRITE: ${{ inputs.overwrite }}
+        GUILD_PUBLISH_CREATE_IF_MISSING: ${{ inputs.create-if-missing }}
+        GUILD_PUBLISH_AGENT_TYPE: ${{ inputs.agent-type }}
+      run: |
+        # Match the CLI's key normalization so diagnostics redact the same secret.
+        GUILD_API_KEY="$(node -p '(process.env.GUILD_API_KEY || "").trim()')"
+        export GUILD_API_KEY
+        if [[ -z "$GUILD_API_KEY" ]]; then
+          echo 'failure-reason=missing-api-key' >> "$GITHUB_OUTPUT"
+          echo '::error::Set GUILD_API_KEY to an account API key with Agents: Write. Browser login is not used.'
+          exit 1
+        fi
+        if [[ ! "$GUILD_PUBLISH_PATH" =~ [^[:space:]] || ! "$GUILD_PUBLISH_AGENT" =~ [^[:space:]] ]]; then
+          echo '::error::path and agent are required.'
+          exit 1
+        fi
+        for name in GUILD_PUBLISH_AGENT GUILD_PUBLISH_VERSION GUILD_PUBLISH_AGENT_TYPE; do
+          if [[ "${!name}" =~ ^[[:space:]]*- ]]; then
+            echo "::error::$name must not start with '-'."
+            exit 1
+          fi
+        done
+        for name in GUILD_PUBLISH_OVERWRITE GUILD_PUBLISH_CREATE_IF_MISSING; do
+          if [[ "${!name}" != true && "${!name}" != false ]]; then
+            echo "::error::$name must be true or false."
+            exit 1
+          fi
+        done
+        if ! workspace="$(cd -- "$GITHUB_WORKSPACE" 2>/dev/null && pwd -P)" ||
+           ! source="$(cd -- "$workspace" && cd -- "$GUILD_PUBLISH_PATH" 2>/dev/null && pwd -P)"; then
+          echo '::error::Cannot open the checkout or agent source directory.'
+          exit 1
+        fi
+        case "$source" in
+          "$workspace"|"$workspace"/*) ;;
+          *) echo '::error::path must stay inside the checked-out repository.'; exit 1 ;;
+        esac
+        cd "$workspace"
+        args=(--mode json agent save "$GUILD_PUBLISH_AGENT" --path "$source" --no-bump --publish
+          --message "GitHub Actions release from $GITHUB_REPOSITORY@$GITHUB_SHA")
+        if [[ -n "$GUILD_PUBLISH_VERSION" ]]; then args+=(--version-number "$GUILD_PUBLISH_VERSION"); fi
+        if [[ "$GUILD_PUBLISH_CREATE_IF_MISSING" == true ]]; then args+=(--create-if-missing); fi
+        if [[ -n "$GUILD_PUBLISH_AGENT_TYPE" ]]; then args+=(--agent-type "$GUILD_PUBLISH_AGENT_TYPE"); fi
+        if [[ "$GUILD_PUBLISH_OVERWRITE" == true ]]; then args+=(--force); fi
+
+        state="$(mktemp -d "$RUNNER_TEMP/guild-publish.XXXXXX")"
+        trap 'rm -rf -- "$state"' EXIT
+        export GUILD_STATE_DIR="$state" GUILD_CONFIG_DIR="$state" GUILDCORE_URL=https://app.guild.ai/api
+        export CI=true NO_COLOR=1
+        unset GUILD_USE_SHARED GUILD_USE_LOCAL
+        # Build diagnostics are log text, not workflow commands. Redact both key forms.
+        log() {
+          local line secret="${GUILD_API_KEY#*:}"
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line//"$GUILD_API_KEY"/***}"
+            if [[ -n "$secret" ]]; then line="${line//"$secret"/***}"; fi
+            line="${line//$'\r'/}"
+            printf 'guild: %s\n' "${line//'##['/'##\['}" >&2
+          done
+        }
+        status=0
+        result="$(guild "${args[@]}" 2> >(log))" || status=$?
+        if (( status != 0 )); then
+          printf '%s\n' "$result" | log
+          exit "$status"
+        fi
+        # Buffer all outputs before writing; missing or malformed IDs must fail closed.
+        outputs="$(jq -ser '
+          if length == 1 then .[0].version else error("Expected one CLI result.") end
+          | [.agent.id, .id, .version_number]
+          | if all(.[]; type == "string" and length > 0 and (test("[\r\n]") | not))
+            then "agent-id=\(.[0])\nversion-id=\(.[1])\nversion=\(.[2])"
+            else error("CLI returned invalid version identifiers. Inspect Guild before retrying.")
+            end
+        ' <<< "$result" 2> >(log))"
+        printf '%s\n' "$outputs" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,6 @@
+# Copyright 2026 Guild.ai
+# SPDX-License-Identifier: Apache-2.0
+title: Publishing Action Example
+description: A minimal Goose agent used to verify publication.
+instructions: |
+  Reply with a brief greeting. Do not request private information or use tools.
