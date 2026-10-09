@@ -17,6 +17,13 @@ async function fixture(t, options = {}) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const callsFile = path.join(root, 'calls');
   const cli = path.join(root, 'cli.mjs');
+  if (!options.missingState) {
+    await mkdir(path.join(root, '.smoke/invalid/.guild'), { recursive: true });
+    await writeFile(path.join(root, '.smoke/invalid/.guild/state.json'), JSON.stringify({
+      base_version_id: options.wrongState ? '77777777-7777-4777-8777-777777777777' : '55555555-5555-4555-8555-555555555555',
+      files: {},
+    }));
+  }
   await writeFile(cli, `
     import { appendFileSync } from 'node:fs';
     const options = ${JSON.stringify(options)};
@@ -26,8 +33,9 @@ async function fixture(t, options = {}) {
       status: 'PUBLISHED', validation_status: 'PASSED' };
     const valid = { id: '22222222-2222-4222-8222-222222222222', version_number: '1.0.1',
       status: 'PUBLISHED', validation_status: 'PASSED' };
-    const invalid = { id: '55555555-5555-4555-8555-555555555555', version_number: '1.0.2',
+    const invalid = { id: '55555555-5555-4555-8555-555555555555', version_number: null,
       status: 'DRAFT', validation_status: 'FAILED' };
+    if (options.validationPassed) invalid.validation_status = 'PASSED';
     const newer = { id: '33333333-3333-4333-8333-333333333333', version_number: '9.9.9',
       status: 'PUBLISHED', validation_status: 'PASSED' };
     if (args[3] === 'get') {
@@ -41,6 +49,7 @@ async function fixture(t, options = {}) {
       const items = [valid];
       if (!options.missingInitial) items.push(initial);
       if (!options.missingInvalid) items.push(invalid);
+      if (options.unrelatedFailure) items.push({ ...invalid, id: '88888888-8888-4888-8888-888888888888', validation_status: 'FAILED' });
       if (options.replaced) items.push(newer);
       if (options.duplicate) items.push({ ...valid, id: newer.id });
       console.log(JSON.stringify({ items, pagination: { limit: 100, offset: 0, total: items.length } }));
@@ -49,7 +58,7 @@ async function fixture(t, options = {}) {
   return {
     root,
     run: () => spawnSync(process.execPath, ['--input-type=module'], {
-      input: verification, encoding: 'utf8', env: {
+      input: verification, encoding: 'utf8', cwd: root, env: {
         PATH: process.env.PATH, RUNNER_TEMP: root, GUILD_PUBLISH_CLI: cli,
         GUILD_API_KEY: 'synthetic-id:synthetic-secret', TEST_AGENT: 'myorg~example',
         VALID_VERSION_ID: '22222222-2222-4222-8222-222222222222',
@@ -85,7 +94,7 @@ test('duplicate smoke uploads changed source from a fresh directory, not the pri
   await assert.rejects(readFile(path.join(duplicate, '.guild/state.json')), { code: 'ENOENT' });
 });
 
-test('smoke verifies current selection and published history for the working version', async t => {
+test('smoke verifies publication and the exact failed draft with no published version number', async t => {
   const f = await fixture(t);
   const result = f.run();
   assert.equal(result.status, 0, result.stderr);
@@ -103,6 +112,9 @@ for (const [name, options] of [
   ['different agent after updating', { wrongAgent: true }],
   ['missing initial publication', { missingInitial: true }],
   ['missing failed validation evidence', { missingInvalid: true }],
+  ['missing local attempt state', { missingState: true }],
+  ['unrelated failed draft instead of this attempt', { wrongState: true }],
+  ['successful validation with an unrelated older failure', { validationPassed: true, unrelatedFailure: true }],
   ['duplicate published version', { duplicate: true }],
 ]) {
   test(`smoke refuses ${name}`, async t => {

@@ -135,7 +135,7 @@ jobs:
         run: |
           node --input-type=module <<'JS'
           import assert from 'node:assert/strict';
-          import { mkdtemp, rm } from 'node:fs/promises';
+          import { mkdtemp, readFile, rm } from 'node:fs/promises';
           import path from 'node:path';
           import { spawnSync } from 'node:child_process';
           const state = await mkdtemp(path.join(process.env.RUNNER_TEMP, 'guild-smoke-state-'));
@@ -172,8 +172,15 @@ jobs:
             assert.equal(working.validation_status, 'PASSED');
             assert.equal(items.filter(version => version.version_number === process.env.VALID_VERSION && version.status === 'PUBLISHED').length, 1,
               'Duplicate publication must not create another published version.');
-            assert.ok(items.some(version => version.version_number === process.env.INVALID_VERSION && version.validation_status === 'FAILED'),
+            // Failed drafts have no published version number. The CLI records
+            // the created draft ID before validation, so verify this exact attempt.
+            const attempt = JSON.parse(await readFile('.smoke/invalid/.guild/state.json', 'utf8'));
+            assert.ok(attempt.base_version_id, 'The invalid-source attempt must have created a draft.');
+            const failed = items.find(version => version.id === attempt.base_version_id);
+            assert.ok(failed, 'The invalid-source draft was not found.');
+            assert.equal(failed.validation_status, 'FAILED',
               'The invalid-source attempt must reach Guild validation and fail, not merely lose authentication.');
+            assert.notEqual(failed.status, 'PUBLISHED', 'The invalid-source draft must not be published.');
             assert.ok(!items.some(version => version.version_number === process.env.INVALID_VERSION && version.status === 'PUBLISHED'),
               'Invalid source must not be published.');
             console.log('Valid publication confirmed: private 1.0.0 creation, same-agent 1.0.1 update, duplicate and invalid-source rejection.');
