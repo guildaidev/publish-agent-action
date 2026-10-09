@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
-const root = new URL('../', import.meta.url).pathname;
+const root = new URL('../', import.meta.url);
 const parsed = spawnSync('ruby', ['-ryaml', '-rjson', '-e',
   'puts JSON.generate(YAML.safe_load(File.read("action.yml"), aliases: true))'], { cwd: root, encoding: 'utf8' });
 assert.equal(parsed.status, 0, parsed.stderr);

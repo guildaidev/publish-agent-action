@@ -102,9 +102,8 @@ runs:
         GUILD_PUBLISH_AGENT_TYPE: ${{ inputs.agent-type }}
       run: |
         # Match the CLI's key normalization so diagnostics redact the same secret.
-        GUILD_API_KEY="${GUILD_API_KEY:-}"
-        GUILD_API_KEY="${GUILD_API_KEY#"${GUILD_API_KEY%%[![:space:]]*}"}"
-        export GUILD_API_KEY="${GUILD_API_KEY%"${GUILD_API_KEY##*[![:space:]]}"}"
+        GUILD_API_KEY="$(node -p '(process.env.GUILD_API_KEY || "").trim()')"
+        export GUILD_API_KEY
         if [[ -z "$GUILD_API_KEY" ]]; then
           echo 'failure-reason=missing-api-key' >> "$GITHUB_OUTPUT"
           echo '::error::Set GUILD_API_KEY to an account API key with Agents: Write. Browser login is not used.'

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
-const repo = new URL('../', import.meta.url).pathname;
+const repo = new URL('../', import.meta.url);
 const parsed = spawnSync('ruby', ['-ryaml', '-rjson', '-e',
   'puts JSON.generate(YAML.safe_load(File.read("action.yml"), aliases: true))'], { cwd: repo, encoding: 'utf8' });
 assert.equal(parsed.status, 0, parsed.stderr);
@@ -95,12 +95,14 @@ test('propagates CLI failure without retry', async t => {
   await assert.rejects(stat(calls[0].env.GUILD_STATE_DIR), { code: 'ENOENT' });
 });
 
-test('missing key cannot fall back to browser login', async t => {
-  const f = await fixture(t);
-  assert.notEqual(f.run({ GUILD_API_KEY: '' }).status, 0);
-  assert.deepEqual(await f.calls(), []);
-  assert.equal(await f.output(), 'failure-reason=missing-api-key\n');
-});
+for (const [name, key] of [['empty', ''], ['whitespace-only', ' \t\n\u00A0\uFEFF']]) {
+  test(name + ' key cannot fall back to browser login', async t => {
+    const f = await fixture(t);
+    assert.notEqual(f.run({ GUILD_API_KEY: key }).status, 0);
+    assert.deepEqual(await f.calls(), []);
+    assert.equal(await f.output(), 'failure-reason=missing-api-key\n');
+  });
+}
 
 test('CLI diagnostics cannot expose keys or inject workflow commands', async t => {
   const f = await fixture(t, { exit: 1, stderr: '::warning::test-secret\n##[error]test-id:test-secret\r::error::injected',
@@ -114,7 +116,7 @@ test('CLI diagnostics cannot expose keys or inject workflow commands', async t =
 
 test('normalizes key whitespace before authentication and log redaction', async t => {
   const f = await fixture(t, { exit: 7, stderr: 'test-id:test-secret\ntest-secret\n' });
-  const result = f.run({ GUILD_API_KEY: ' \ttest-id:test-secret\n ' });
+  const result = f.run({ GUILD_API_KEY: ' \t\u00A0test-id:test-secret\n \uFEFF' });
   assert.equal(result.status, 7);
   assert.ok(!(result.stdout + result.stderr).includes('test-secret'));
   assert.equal((await f.calls())[0].env.GUILD_API_KEY, 'test-id:test-secret');
