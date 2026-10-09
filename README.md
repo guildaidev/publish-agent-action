@@ -8,6 +8,10 @@ No prior clone or `guild.json` is required.
 The Action pins Guild CLI **0.27.1**. CLI upgrades are reviewed pin-update PRs
 and ship with a new Action release, not automatic updates to `latest`.
 
+New to Guild publishing? Start with the [customer quickstart](CUSTOMER-QUICKSTART.md)
+for a minimal package, account-key setup, first private release and an update.
+It also records the current distribution status before external trials.
+
 ## Usage
 
 Store a Guild account API key with **Agents: Write** as the repository secret
