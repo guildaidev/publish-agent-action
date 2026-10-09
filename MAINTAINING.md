@@ -4,7 +4,7 @@
 Before merging or releasing, review changes to subprocess arguments, npm inputs,
 credential isolation, workflow-command neutralization, and CLI output mapping.
 Keep third-party Actions pinned to reviewed full SHAs. Use the same root composite
-in examples and smoke tests. Creation is delegated to the shipped CLI 0.27.1+
+in examples and smoke tests. Creation is delegated to the pinned CLI
 resolver, never a second create implementation or a parsed error-message heuristic.
 Version selection, validation and publication also stay in the CLI. Do not add
 Action-specific release policies when the CLI already provides them.
@@ -42,8 +42,9 @@ reviewed commit. Create an immutable semantic release tag such as `v1.0.0` and a
 GitHub Release, then deliberately move the `v1` major alias to that tested commit.
 Publish release notes covering behavior, validation, and CLI compatibility.
 Customers who require immutable dependencies should use a full commit SHA;
-the major alias intentionally rolls forward. Test CLI-version overrides before
-changing the default CLI pin.
+the major alias intentionally rolls forward. CLI upgrades require a reviewed PR
+updating the pin in `action.yml`, tests, documentation, and matching CI/smoke
+version expectations, followed by validation and a new Action release.
 
 Public visibility requires explicit owner approval and a reviewed Terraform
 change. Keep the repository private until that change is approved. Marketplace

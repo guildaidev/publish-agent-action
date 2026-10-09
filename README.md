@@ -5,6 +5,9 @@ Publish an agent from a repository directory. This Action installs the Guild CLI
 and runs `guild agent save --publish`. Guild handles source validation and publication.
 No prior clone or `guild.json` is required.
 
+The Action pins Guild CLI **0.27.1**. CLI upgrades are reviewed pin-update PRs
+and ship with a new Action release, not automatic updates to `latest`.
+
 ## Usage
 
 Store a Guild account API key with **Agents: Write** as the repository secret
@@ -78,7 +81,6 @@ Failed validation can leave a private unpublished agent for inspection.
 | `overwrite` | Default `false`. `true` passes `--force`, making repo source authoritative over Guild editor changes. |
 | `create-if-missing` | Default `false`. `true` permits private creation; requires `agent-type`. |
 | `agent-type` | Only with creation: `GUILD_TYPESCRIPT`, `GUILD_NATIVE`, `GOOSE`, `OPENCLAW`, or `LANGGRAPH`, subject to the account's enabled types. |
-| `cli-version` | Default `0.27.1`. An exact stable version >= `0.27.1`, or `latest`. Test overrides before production use. |
 
 The Action passes `--no-bump`: it does not edit `package.json`. Without the
 `version` input, the CLI uses the package version when present; for packages

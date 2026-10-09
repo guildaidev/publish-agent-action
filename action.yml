@@ -30,10 +30,6 @@ inputs:
     description: Required with create-if-missing. GUILD_TYPESCRIPT, GUILD_NATIVE, GOOSE, OPENCLAW, or LANGGRAPH; must match any existing target.
     required: false
     default: ''
-  cli-version:
-    description: Exact stable Guild CLI version >= 0.27.1, or latest. Future versions are not guaranteed compatible.
-    required: false
-    default: '0.27.1'
 
 outputs:
   agent-id:
@@ -49,7 +45,7 @@ outputs:
     description: missing-api-key when publication was refused because no key was supplied; empty otherwise.
     value: ${{ steps.publish.outputs.failure-reason }}
   cli-version:
-    description: Verified installed CLI version, available even when publication fails.
+    description: Installed CLI version, available even when publication fails.
     value: ${{ steps.cli.outputs.cli-version }}
 
 runs:
@@ -70,24 +66,11 @@ runs:
       env:
         GUILD_API_KEY: ''
         NODE_AUTH_TOKEN: ''
-        GUILD_PUBLISH_CLI_VERSION: ${{ inputs.cli-version }}
       run: |
-        if [[ "$GUILD_PUBLISH_CLI_VERSION" != latest && ! "$GUILD_PUBLISH_CLI_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-          echo '::error::cli-version must be an exact stable version or latest.'
-          exit 1
-        fi
         cd "$RUNNER_TEMP"
         npm install --global --ignore-scripts --no-audit --no-fund \
-          --registry=https://registry.npmjs.org "@guildai/cli@$GUILD_PUBLISH_CLI_VERSION"
+          --registry=https://registry.npmjs.org @guildai/cli@0.27.1
         installed="$(guild --version)"
-        node - "$installed" <<'JS'
-        const version = process.argv[2];
-        const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(version);
-        if (!match || !(Number(match[1]) > 0 || Number(match[2]) > 27 ||
-          (Number(match[2]) === 27 && Number(match[3]) >= 1))) {
-          throw new Error('Guild CLI must be stable 0.27.1 or newer.');
-        }
-        JS
         echo "cli-version=$installed" >> "$GITHUB_OUTPUT"
 
     - name: Upload, validate, and publish
