@@ -112,10 +112,10 @@ jobs:
           DUPLICATE_CLI_VERSION: ${{ steps.duplicate.outputs.cli-version }}
         run: |
           test "$INVALID_OUTCOME" = 'failure'
-          test "$CLI_VERSION" = '0.27.1'
+          test "$CLI_VERSION" = '0.27.2'
           test -z "$INVALID_REASON$INVALID_VERSION_ID"
           test "$DUPLICATE_OUTCOME" = 'failure'
-          test "$DUPLICATE_CLI_VERSION" = '0.27.1'
+          test "$DUPLICATE_CLI_VERSION" = '0.27.2'
           test -z "$DUPLICATE_REASON$DUPLICATE_VERSION_ID"
       - name: Confirm the working publication survived the rejected source
         env:

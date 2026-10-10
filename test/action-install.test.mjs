@@ -21,7 +21,7 @@ async function fixture(t, { npmExit = 0, guildExit = 0 } = {}) {
     ['npm', `require('fs').writeFileSync(${JSON.stringify(path.join(dir, 'npm-call'))},
       JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), key: process.env.GUILD_API_KEY }));
       process.exit(${npmExit});`],
-    ['guild', `console.log('0.27.1'); process.exit(${guildExit});`],
+    ['guild', `console.log('0.27.2'); process.exit(${guildExit});`],
   ]) {
     const file = path.join(dir, 'bin', name);
     await writeFile(file, `#!${process.execPath}\n${code}\n`);
@@ -48,10 +48,10 @@ test('installs the pinned CLI with standard npm and without publishing credentia
   assert.equal(result.status, 0, result.stderr);
   const call = await f.call();
   assert.deepEqual(call.args, ['install', '--global', '--ignore-scripts', '--no-audit', '--no-fund',
-    '--registry=https://registry.npmjs.org', '@guildai/cli@0.27.1']);
+    '--registry=https://registry.npmjs.org', '@guildai/cli@0.27.2']);
   assert.equal(call.key, '');
   assert.equal(call.cwd, f.dir);
-  assert.equal(await f.output(), 'cli-version=0.27.1\n');
+  assert.equal(await f.output(), 'cli-version=0.27.2\n');
 });
 
 for (const [name, exits, status] of [
