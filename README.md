@@ -5,7 +5,7 @@ Publish an agent from a repository directory. This Action installs the Guild CLI
 and runs `guild agent save --publish`. Guild handles source validation and publication.
 No prior clone or `guild.json` is required.
 
-The Action pins Guild CLI **0.27.1**. CLI upgrades are reviewed pin-update PRs
+The Action pins Guild CLI **0.27.2**. CLI upgrades are reviewed pin-update PRs
 and ship with a new Action release, not automatic updates to `latest`.
 
 ## Usage

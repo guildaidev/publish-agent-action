@@ -69,7 +69,7 @@ runs:
       run: |
         cd "$RUNNER_TEMP"
         npm install --global --ignore-scripts --no-audit --no-fund \
-          --registry=https://registry.npmjs.org @guildai/cli@0.27.1
+          --registry=https://registry.npmjs.org @guildai/cli@0.27.2
         installed="$(guild --version)"
         echo "cli-version=$installed" >> "$GITHUB_OUTPUT"
 
