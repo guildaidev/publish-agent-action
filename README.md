@@ -5,13 +5,31 @@ Publish an agent from a repository directory. This Action installs the Guild CLI
 and runs `guild agent save --publish`. Guild handles source validation and publication.
 No prior clone or `guild.json` is required.
 
+[Setup guide](https://docs.guild.ai/cli/github-actions) ·
+[GitHub Marketplace](https://github.com/marketplace/actions/publish-agent-to-guild) ·
+[Release v1.0.0](https://github.com/guildaidev/publish-agent-action/releases/tag/v1.0.0)
+
+Your source repository can be private. The workflow sends files to Guild;
+you do not need to grant Guild access to your GitHub repository.
+
 The Action pins Guild CLI **0.27.2**. CLI upgrades are reviewed pin-update PRs
 and ship with a new Action release, not automatic updates to `latest`.
 
 ## Usage
 
-Store a Guild account API key with **Agents: Write** as the repository secret
-`GUILD_API_KEY`. The key can write agents across that account, not just this agent.
+Store a [Guild account API key](https://docs.guild.ai/platform/api-keys) with
+**Agents: Read & write** (`agents:write`) as the repository secret `GUILD_API_KEY`.
+Use the full `<api_key_id>:<api_key_secret>` value. The key can write agents across
+that account, not just this agent. Never commit it or paste it into a coding-agent chat.
+
+**Publishing locally instead?** The CLI also supports browser OAuth through
+`guild auth login`, with no API key required. See the
+[local publishing instructions](https://docs.guild.ai/cli/github-actions#publish-locally-with-browser-login).
+This Action uses an account API key only, not browser OAuth or your local login.
+
+Save the workflow below as `.github/workflows/publish-agent.yml`. Replace the
+source path and `myorg~example` with your existing agent's directory and target.
+For a new target, also add the [first-release inputs](#first-release).
 
 ```yaml
 name: Publish agent
@@ -38,7 +56,7 @@ jobs:
           persist-credentials: false
       - name: Publish to Guild
         id: publish
-        uses: guildaidev/publish-agent-action@v1 # Prefer a reviewed full commit SHA.
+        uses: guildaidev/publish-agent-action@v1.0.0
         with:
           path: agents/example
           agent: myorg~example
@@ -47,10 +65,17 @@ jobs:
           GUILD_API_KEY: ${{ secrets.GUILD_API_KEY }}
 ```
 
-The `v1` alias will be available after the official release. Access to this
-repository is required while it is private. Customers control release timing:
-keep `push` for automatic releases, `workflow_dispatch` for manual releases, or
-use `release: { types: [published] }` with a matching job condition.
+For an immutable pin, use `@d5f1dc7abe6bab172653d1ab16f4d5f68ea54e0c`, the commit
+for `v1.0.0`. Keep `push` for automatic releases, `workflow_dispatch` for manual
+releases, or use `release: { types: [published] }` with a matching job condition.
+
+The example sets `overwrite: 'true'`: repository source replaces Guild editor
+changes in the new version. Omit it unless the repository is your source of truth.
+It does not replace an already-published version or change visibility.
+
+The [setup guide](https://docs.guild.ai/cli/github-actions) includes a complete
+manual-release walkthrough, versioning, multiple agents, troubleshooting, and a
+copy-paste prompt for Claude Code, Codex, or another coding agent.
 
 ### First release
 
@@ -70,6 +95,8 @@ The CLI creates only when the target returns HTTP 404. Other errors do not
 authorize creation. Existing targets must match the requested type. Creation is
 opt-in and does not imply overwrite consent; double-check the target name.
 Failed validation can leave a private unpublished agent for inspection.
+After a successful first release, increase the explicit version for the next
+release, for example to `1.0.1`. Do not leave `1.0.0` in an automatic workflow.
 
 ## Inputs and outputs
 
@@ -123,5 +150,5 @@ It verifies private `1.0.0` creation, same-agent `1.0.1` update, duplicate-versi
 rejection, and failed validation without replacing the working release.
 Test artifacts remain for inspection. Use a new name for each run.
 
-See [Maintaining the Action](MAINTAINING.md) for launch gates.
+See [Maintaining the Action](MAINTAINING.md) for the release checklist.
 License: [Apache-2.0](LICENSE).
