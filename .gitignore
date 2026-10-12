@@ -1,6 +1,5 @@
 # Copyright 2026 Guild.ai
 # SPDX-License-Identifier: Apache-2.0
 node_modules/
-.smoke/
 *.log
 .DS_Store
