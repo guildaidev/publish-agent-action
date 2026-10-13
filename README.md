@@ -7,6 +7,7 @@ uploads the selected directory, waits for Guild validation, and publishes the ve
 Your repository can be private: the workflow sends files to Guild, so Guild does
 not need access to your GitHub repository.
 
+[Official setup guide](https://docs.guild.ai/cli/github-actions) ·
 [GitHub Marketplace](https://github.com/marketplace/actions/publish-agent-to-guild) ·
 [Release v1.0.0](https://github.com/guildaidev/publish-agent-action/releases/tag/v1.0.0)
 
@@ -20,7 +21,8 @@ For an existing agent, use its target, type, source format, and a higher version
 
 1. Sign in to Guild and use the account switcher to select the personal account
    or organization that will own the agent.
-2. Open **Access & setup > API keys**. Create a key with **Agents: Read & write**
+2. Open **Access & setup > API keys**. [Create a key](https://docs.guild.ai/platform/api-keys)
+   with **Agents: Read & write**
    (`agents:write`), leaving other permissions at **No access** for this example.
    Ask your Guild account admin if you cannot create keys.
 3. In your GitHub repository, open **Settings > Secrets and variables > Actions**.
@@ -251,7 +253,7 @@ Copy this into Claude Code, Codex, or another coding agent with repository acces
 
 ```text
 Set up one-way agent publishing to Guild using this guide:
-https://github.com/guildaidev/publish-agent-action#readme
+https://docs.guild.ai/cli/github-actions
 
 Inspect the agent directories, formats, and dependencies. Report incompatibilities;
 do not silently drop unsupported fields. Ask me to confirm each owner~name target,
