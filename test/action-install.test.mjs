@@ -17,11 +17,19 @@ async function fixture(t, { npmExit = 0, guildExit = 0 } = {}) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'guild-install-test-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
   await mkdir(path.join(dir, 'bin'));
+  const actionPath = path.join(dir, 'action source');
+  await mkdir(actionPath);
+  await writeFile(path.join(actionPath, 'package.json'), JSON.stringify({
+    dependencies: { '@guildai/cli': '9.8.7' },
+  }));
+  await writeFile(path.join(dir, 'package.json'), JSON.stringify({
+    dependencies: { '@guildai/cli': '0.0.1' },
+  }));
   for (const [name, code] of [
     ['npm', `require('fs').writeFileSync(${JSON.stringify(path.join(dir, 'npm-call'))},
       JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), key: process.env.GUILD_API_KEY }));
       process.exit(${npmExit});`],
-    ['guild', `console.log('0.27.2'); process.exit(${guildExit});`],
+    ['guild', `console.log('9.8.7'); process.exit(${guildExit});`],
   ]) {
     const file = path.join(dir, 'bin', name);
     await writeFile(file, `#!${process.execPath}\n${code}\n`);
@@ -31,9 +39,10 @@ async function fixture(t, { npmExit = 0, guildExit = 0 } = {}) {
   return {
     dir,
     run: () => spawnSync('bash', ['--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', step.run], {
-      cwd: root, encoding: 'utf8', env: {
+      cwd: dir, encoding: 'utf8', env: {
         PATH: path.join(dir, 'bin') + path.delimiter + process.env.PATH, HOME: dir,
         GITHUB_OUTPUT: path.join(dir, 'output'), RUNNER_TEMP: dir,
+        GITHUB_ACTION_PATH: actionPath,
         GUILD_API_KEY: step.env.GUILD_API_KEY, NODE_AUTH_TOKEN: step.env.NODE_AUTH_TOKEN,
       },
     }),
@@ -42,16 +51,16 @@ async function fixture(t, { npmExit = 0, guildExit = 0 } = {}) {
   };
 }
 
-test('installs the pinned CLI with standard npm and without publishing credentials', async t => {
+test('installs the Action manifest pin, not the caller pin, without publishing credentials', async t => {
   const f = await fixture(t);
   const result = f.run();
   assert.equal(result.status, 0, result.stderr);
   const call = await f.call();
   assert.deepEqual(call.args, ['install', '--global', '--ignore-scripts', '--no-audit', '--no-fund',
-    '--registry=https://registry.npmjs.org', '@guildai/cli@0.27.2']);
+    '--registry=https://registry.npmjs.org', '@guildai/cli@9.8.7']);
   assert.equal(call.key, '');
   assert.equal(call.cwd, f.dir);
-  assert.equal(await f.output(), 'cli-version=0.27.2\n');
+  assert.equal(await f.output(), 'cli-version=9.8.7\n');
 });
 
 for (const [name, exits, status] of [

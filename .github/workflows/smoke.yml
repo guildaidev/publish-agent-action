@@ -111,11 +111,12 @@ jobs:
           DUPLICATE_VERSION_ID: ${{ steps.duplicate.outputs.version-id }}
           DUPLICATE_CLI_VERSION: ${{ steps.duplicate.outputs.cli-version }}
         run: |
+          expected_cli="$(jq -er '.dependencies["@guildai/cli"]' package.json)"
           test "$INVALID_OUTCOME" = 'failure'
-          test "$CLI_VERSION" = '0.27.2'
+          test "$CLI_VERSION" = "$expected_cli"
           test -z "$INVALID_REASON$INVALID_VERSION_ID"
           test "$DUPLICATE_OUTCOME" = 'failure'
-          test "$DUPLICATE_CLI_VERSION" = '0.27.2'
+          test "$DUPLICATE_CLI_VERSION" = "$expected_cli"
           test -z "$DUPLICATE_REASON$DUPLICATE_VERSION_ID"
       - name: Confirm the working publication survived the rejected source
         env:

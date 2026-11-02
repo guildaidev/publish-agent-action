@@ -232,7 +232,7 @@ Read them as, for example, `steps.publish.outputs.version-id` in a later step.
 For interactive use, the CLI supports browser OAuth without an API key:
 
 ```bash
-npm install --global @guildai/cli@0.27.2
+npm install --global @guildai/cli
 unset GUILD_API_KEY
 guild auth login
 guild auth status
@@ -288,6 +288,9 @@ source. Revoke the Guild key and remove the GitHub secret when no longer needed.
 - `v1.0.0` installs **Guild CLI 0.27.2**. Upgrades require a reviewed pin update and
   a new Action release; it does not install `latest` automatically. For an immutable
   Action pin, use `@d5f1dc7abe6bab172653d1ab16f4d5f68ea54e0c`.
+- The next release's CLI pin is tracked in [package.json](package.json).
+  Dependabot proposes weekly updates, which still require review, validation,
+  and an Action release. Existing release tags do not change automatically.
 - Use GitHub-hosted Ubuntu. The Action sets up Node.js 22 and uses Bash and jq.
   It installs the CLI without the publishing key or npm lifecycle scripts, then
   runs `guild agent save --publish` against `https://app.guild.ai` with isolated login state.
