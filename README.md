@@ -232,7 +232,7 @@ Read them as, for example, `steps.publish.outputs.version-id` in a later step.
 For interactive use, the CLI supports browser OAuth without an API key:
 
 ```bash
-npm install --global @guildai/cli
+npm install --global @guildai/cli@0.27.2
 unset GUILD_API_KEY
 guild auth login
 guild auth status
