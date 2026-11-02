@@ -44,7 +44,7 @@ Publish release notes covering behavior, validation, and CLI compatibility.
 Customers who require immutable dependencies should use a full commit SHA;
 the major alias intentionally rolls forward.
 
-The exact CLI pin lives in `package.json`. Dependabot checks weekly and opens
+The exact CLI pin lives in `package.json`. Dependabot checks daily (weekdays) and opens
 ordinary update PRs; the Action and CI/smoke version checks read the same pin.
 These PRs run credential-free CI. No reviewers are configured, and merging or
 releasing is not automated. Review the CLI changes, merge the pin update, then
