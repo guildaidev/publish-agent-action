@@ -1,0 +1,8 @@
+{
+  "name": "publish-agent-action",
+  "private": true,
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@guildai/cli": "0.28.0"
+  }
+}

@@ -67,9 +67,10 @@ runs:
         GUILD_API_KEY: ''
         NODE_AUTH_TOKEN: ''
       run: |
+        cli_version="$(jq -er '.dependencies["@guildai/cli"]' "$GITHUB_ACTION_PATH/package.json")"
         cd "$RUNNER_TEMP"
         npm install --global --ignore-scripts --no-audit --no-fund \
-          --registry=https://registry.npmjs.org @guildai/cli@0.27.2
+          --registry=https://registry.npmjs.org "@guildai/cli@$cli_version"
         installed="$(guild --version)"
         echo "cli-version=$installed" >> "$GITHUB_OUTPUT"
 

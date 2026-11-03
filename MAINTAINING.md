@@ -17,7 +17,7 @@ Run:
 ```sh
 node --test test/*.test.mjs
 actionlint
-ruby -e 'require "yaml"; ARGV.each { |file| YAML.safe_load(File.read(file), aliases: true) }' action.yml .github/workflows/ci.yml .github/workflows/smoke.yml
+ruby -e 'require "yaml"; ARGV.each { |file| YAML.safe_load(File.read(file), aliases: true) }' action.yml .github/workflows/ci.yml .github/workflows/smoke.yml .github/dependabot.yml
 git diff --check
 gitleaks git --redact
 ```
@@ -42,9 +42,15 @@ reviewed commit. Create an immutable semantic release tag such as `v1.0.0` and a
 GitHub Release, then deliberately move the `v1` major alias to that tested commit.
 Publish release notes covering behavior, validation, and CLI compatibility.
 Customers who require immutable dependencies should use a full commit SHA;
-the major alias intentionally rolls forward. CLI upgrades require a reviewed PR
-updating the pin in `action.yml`, tests, documentation, and matching CI/smoke
-version expectations, followed by validation and a new Action release.
+the major alias intentionally rolls forward.
+
+The exact CLI pin lives in `package.json`. Dependabot checks daily (weekdays) and opens
+ordinary update PRs; the Action and CI/smoke version checks read the same pin.
+These PRs run credential-free CI. No reviewers are configured, and merging or
+releasing is not automated. Review the CLI changes, merge the pin update, then
+run authenticated smoke on that commit before publishing a new Action release.
+Existing release tags keep their original CLI; merging a pin update alone does
+not upgrade customers using a released tag.
 
 Public visibility requires explicit owner approval and a reviewed Terraform
 change. Keep the repository private until that change is approved. Marketplace

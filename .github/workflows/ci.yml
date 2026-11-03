@@ -25,7 +25,7 @@ jobs:
         run: node --test test/*.test.mjs
       - name: Parse Action metadata and lint workflows
         run: |
-          ruby -e 'require "yaml"; ARGV.each { |file| YAML.safe_load(File.read(file), aliases: true) }' action.yml .github/workflows/ci.yml .github/workflows/smoke.yml
+          ruby -e 'require "yaml"; ARGV.each { |file| YAML.safe_load(File.read(file), aliases: true) }' action.yml .github/workflows/ci.yml .github/workflows/smoke.yml .github/dependabot.yml
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       - name: Check whitespace
         run: git diff --check
@@ -48,7 +48,7 @@ jobs:
           VERSION_ID: ${{ steps.missing-key.outputs.version-id }}
           SOURCE_VERSION: ${{ steps.missing-key.outputs.version }}
         run: |
-          test "$CLI_VERSION" = '0.27.2'
+          test "$CLI_VERSION" = "$(jq -er '.dependencies["@guildai/cli"]' package.json)"
           test "$ACTION_OUTCOME" = 'failure'
           test "$FAILURE_REASON" = 'missing-api-key'
           test -z "$AGENT_ID$VERSION_ID$SOURCE_VERSION"
